@@ -3,7 +3,6 @@ import datetime as dt
 import importlib.util
 import io
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -26,12 +25,10 @@ class MailCalTests(unittest.TestCase):
         self.assertEqual(mailcal.detect_mail_provider("person@163.com"), "netease163")
         self.assertEqual(mailcal.detect_mail_provider("person@example.com"), "generic")
 
-    def test_secret_from_environment(self):
-        os.environ["MAILCAL_TEST_SECRET"] = "value"
-        try:
-            self.assertEqual(mailcal.resolve_secret("env:MAILCAL_TEST_SECRET"), "value")
-        finally:
-            del os.environ["MAILCAL_TEST_SECRET"]
+    def test_storage_directory_is_always_under_home(self):
+        home = Path("C:/Users/example")
+        with mock.patch.object(mailcal.Path, "home", return_value=home):
+            self.assertEqual(mailcal.storage_directory(), home / ".mail-calendar-skill")
 
     def test_relative_since(self):
         self.assertEqual(mailcal.parse_since("7d"), dt.date.today() - dt.timedelta(days=7))
@@ -91,7 +88,7 @@ class MailCalTests(unittest.TestCase):
             '<d:displayname>Recruiting</d:displayname><d:resourcetype><d:collection/>'
             '<c:calendar/></d:resourcetype></d:prop></d:propstat></d:response></d:multistatus>'
         )
-        settings = {"base_url": "https://dav.example/", "auth": "basic", "username": "u", "secret_ref": "env:X"}
+        settings = {"base_url": "https://dav.example/", "auth": "basic", "username": "u", "secret": "password"}
         with mock.patch.object(mailcal, "propfind", side_effect=[first, principal, listing]) as propfind:
             result = mailcal.calendar_list(settings)
         self.assertEqual(result, [{"name": "Recruiting", "url": "https://dav.example/calendars/user/recruiting/"}])
@@ -100,7 +97,7 @@ class MailCalTests(unittest.TestCase):
     def test_calendar_create_uses_stable_resource_url(self):
         settings = {
             "base_url": "https://dav.example/", "collection_url": "https://dav.example/cal/recruiting/",
-            "auth": "basic", "username": "u", "secret_ref": "env:X",
+            "auth": "basic", "username": "u", "secret": "password",
         }
         event = {"source_id": "message-1", "summary": "Interview", "start": "2026-09-15T14:00:00+08:00"}
         expected_uid, _ = mailcal.event_to_ics(event)
@@ -110,20 +107,92 @@ class MailCalTests(unittest.TestCase):
         self.assertEqual(result["url"], f"https://dav.example/cal/recruiting/{expected_uid}.ics")
         self.assertEqual(request.call_args.args[1], "PUT")
 
-    def test_config_init_writes_no_raw_secret(self):
+    def test_config_init_separates_settings_and_plaintext_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "config.json"
-            with contextlib.redirect_stdout(io.StringIO()):
+            root = Path(directory) / ".mail-calendar-skill"
+            with mock.patch.object(mailcal, "storage_directory", return_value=root), \
+                    mock.patch.object(mailcal, "getpass", side_effect=["mail-pass", "calendar-pass"]), \
+                    mock.patch.object(mailcal, "_make_private"), \
+                    contextlib.redirect_stdout(io.StringIO()):
                 code = mailcal.main([
-                    "--config", str(path), "config", "init", "--email", "person@163.com",
-                    "--mail-secret-ref", "env:MAIL_SECRET", "--calendar-provider", "qq",
-                    "--calendar-user", "person@qq.com", "--calendar-secret-ref", "env:CAL_SECRET",
+                    "config", "init", "--email", "person@163.com",
+                    "--calendar-provider", "qq", "--calendar-user", "person@qq.com",
                 ])
             self.assertEqual(code, 0)
-            value = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(value["mail"]["host"], "imap.163.com")
-            self.assertEqual(value["calendar"]["base_url"], "https://dav.qq.com/")
-            self.assertEqual(value["mail"]["secret_ref"], "env:MAIL_SECRET")
+            settings = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+            credentials = json.loads((root / "credentials.json").read_text(encoding="utf-8"))
+            self.assertEqual(settings["mail"]["host"], "imap.163.com")
+            self.assertEqual(settings["calendar"]["base_url"], "https://dav.qq.com/")
+            self.assertNotIn("mail-pass", json.dumps(settings))
+            self.assertNotIn("calendar-pass", json.dumps(settings))
+            self.assertEqual(credentials["mail"]["secret"], "mail-pass")
+            self.assertEqual(credentials["calendar"]["secret"], "calendar-pass")
+
+    def test_config_show_never_outputs_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = mailcal.ConfigStore(root)
+            settings = {
+                "version": 1, "timezone": "Asia/Shanghai",
+                "mail": {"address": "person@example.com", "host": "imap.example.com", "port": 993,
+                         "security": "ssl", "auth": "password"},
+                "calendar": {"base_url": "https://dav.example/", "auth": "basic", "username": "person"},
+            }
+            credentials = {"version": 1, "mail": {"secret": "mail-pass"},
+                           "calendar": {"secret": "calendar-pass"}}
+            with mock.patch.object(mailcal, "_make_private"):
+                store.initialize(settings, credentials, force=False)
+            args = mailcal.build_parser().parse_args(["config", "show"])
+            result = mailcal.cmd_config(args, store)
+            serialized = json.dumps(result)
+            self.assertNotIn("mail-pass", serialized)
+            self.assertNotIn("calendar-pass", serialized)
+            self.assertTrue(result["credentials_present"])
+
+    def test_runtime_settings_are_merged_only_by_config_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "settings.json").write_text(json.dumps({
+                "version": 1, "timezone": "Asia/Shanghai",
+                "mail": {"address": "a@example.com", "host": "imap.example.com", "port": 993,
+                         "security": "ssl", "auth": "password"},
+                "calendar": {"base_url": "https://dav.example/", "auth": "bearer"},
+            }), encoding="utf-8")
+            (root / "credentials.json").write_text(json.dumps({
+                "version": 1, "mail": {"secret": "m"}, "calendar": {"secret": "c"},
+            }), encoding="utf-8")
+            store = mailcal.ConfigStore(root)
+            self.assertEqual(store.mail()["secret"], "m")
+            self.assertEqual(store.calendar()["secret"], "c")
+
+    def test_unsupported_settings_fields_are_rejected(self):
+        settings = {
+            "mail": {"address": "a@example.com", "host": "imap.example.com", "port": 993,
+                     "security": "ssl", "auth": "password", "legacy_credential": "legacy"},
+        }
+        with self.assertRaisesRegex(mailcal.ConfigError, "Unsupported mail fields"):
+            mailcal.validate_mail_settings(settings)
+
+    def test_posix_private_permissions(self):
+        path = Path("credentials.json")
+        with mock.patch.object(mailcal.os, "chmod") as chmod:
+            mailcal._make_private(path, directory=False, platform="posix")
+        chmod.assert_called_once_with(path, 0o600)
+
+    def test_posix_private_directory_permissions(self):
+        path = Path(".mail-calendar-skill")
+        with mock.patch.object(mailcal.os, "chmod") as chmod:
+            mailcal._make_private(path, directory=True, platform="posix")
+        chmod.assert_called_once_with(path, 0o700)
+
+    def test_windows_acl_grants_before_disabling_inheritance(self):
+        completed = mock.Mock(returncode=0, stdout="desktop\\person\n")
+        with mock.patch.object(mailcal.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(mailcal._tighten_windows_acl(Path("credentials.json"), directory=False))
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(run.call_args_list[0].args[0], ["whoami"])
+        self.assertIn("desktop\\person:F", run.call_args_list[1].args[0])
+        self.assertEqual(run.call_args_list[2].args[0][-1], "/inheritance:r")
 
     def test_json_state_cursor_ack_and_retry(self):
         with tempfile.TemporaryDirectory() as directory:

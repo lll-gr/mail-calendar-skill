@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "timezone": "Asia/Shanghai",
+  "mail": {
+    "provider": "qq",
+    "address": "person@qq.com",
+    "host": "imap.qq.com",
+    "port": 993,
+    "security": "ssl",
+    "auth": "password"
+  },
+  "calendar": {
+    "provider": "qq",
+    "base_url": "https://dav.qq.com/",
+    "collection_url": "https://dav.qq.com/calendars/person/default/",
+    "auth": "basic",
+    "username": "person@qq.com"
+  }
+}

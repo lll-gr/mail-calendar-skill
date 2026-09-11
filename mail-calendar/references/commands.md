@@ -3,16 +3,16 @@
 ## 基本格式
 
 ```text
-python scripts/mailcal.py [--config PATH] [--state PATH] <命令组> <子命令> [参数]
+python scripts/mailcal.py <命令组> <子命令> [参数]
 ```
 
-全局参数必须放在命令组之前：
+唯一的全局参数：
 
 | 参数 | 说明 |
 |---|---|
-| `--config PATH` | 指定配置文件，覆盖 `MAILCAL_CONFIG` 和默认位置。 |
-| `--state PATH` | 指定处理状态 JSON，覆盖 `MAILCAL_STATE` 和默认位置。 |
 | `--version` | 输出 CLI 版本。 |
+
+设置、凭据和状态文件固定保存在 `~/.mail-calendar-skill/`，不支持路径覆盖。
 
 命令成功时输出 `{"ok": true, "data": ...}`；失败时向标准错误输出 `{"ok": false, "error": ...}` 并返回非零退出码。
 
@@ -31,7 +31,7 @@ python scripts/mailcal.py provider show calendar qq
 ### `config init`
 
 ```text
-python scripts/mailcal.py config init --email person@qq.com --mail-provider qq --mail-secret-ref keyring:mail-calendar:person@qq.com --calendar-provider qq --calendar-user person@qq.com --calendar-secret-ref keyring:mail-calendar:person@qq.com
+python scripts/mailcal.py config init --email person@qq.com --mail-provider qq --calendar-provider qq --calendar-user person@qq.com --reuse-mail-secret
 ```
 
 | 参数 | 是否必需 | 说明 |
@@ -42,17 +42,16 @@ python scripts/mailcal.py config init --email person@qq.com --mail-provider qq -
 | `--mail-port PORT` | 否 | 覆盖预设端口；`generic` 默认 993。 |
 | `--mail-security ssl\|starttls\|plain` | 否 | 连接安全方式；`generic` 默认 `ssl`。 |
 | `--mail-auth password\|xoauth2` | 否 | 邮箱认证方式；可覆盖预设。 |
-| `--mail-secret-ref REF` | 是 | `keyring:SERVICE:USERNAME` 或 `env:VARIABLE`。 |
 | `--calendar-provider qq\|google\|generic` | 是 | CalDAV 服务商。 |
 | `--calendar-url URL` | 否 | CalDAV 基础地址；常用于覆盖预设或配置 `generic`。 |
 | `--calendar-collection-url URL` | 否 | 直接指定目标日历集合地址。 |
 | `--calendar-user USER` | 条件必需 | `basic` 认证需要用户名。 |
 | `--calendar-auth basic\|bearer` | 否 | 覆盖日历认证方式。 |
-| `--calendar-secret-ref REF` | 是 | 日历密码、授权码或 token 的安全引用。 |
+| `--reuse-mail-secret` | 否 | 邮箱与日历共用同一份密码、授权码或 token。 |
 | `--timezone ZONE` | 否 | 默认 `Asia/Shanghai`。 |
 | `--force` | 否 | 覆盖已经存在的配置文件。 |
 
-凭据准备和不同系统的保存方式见 [configuration.md](configuration.md)。
+CLI 会交互式隐藏读取凭据并写入 `credentials.json`。凭据文件格式和权限见 [configuration.md](configuration.md)。
 
 ### `config show` 和 `config test`
 
@@ -61,7 +60,7 @@ python scripts/mailcal.py config show
 python scripts/mailcal.py config test
 ```
 
-- `config show` 输出当前配置和路径，不解析或输出实际密码。
+- `config show` 输出固定路径、非敏感设置和凭据文件是否存在，不读取或输出实际密码/token。
 - `config test` 实际连接 IMAP，并通过 CalDAV 发现日历，用于验证凭据和服务器地址。
 
 ## 读取邮件

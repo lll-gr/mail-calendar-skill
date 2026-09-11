@@ -13,8 +13,9 @@
 - 使用本地 JSON 游标记录扫描进度，避免每次重复读取旧邮件。
 - 使用 IMAP `UIDVALIDITY` 防止服务端重新分配 UID 后错误跳过邮件。
 - 重复创建相同 UID 的日程时更新同一个 `.ics` 资源。
-- 密码和授权码可保存在 Windows 凭据管理器、macOS 钥匙串或 Linux 系统密钥库中。
-- CLI 核心只使用 Python 标准库；系统密钥库支持通过可选的 `keyring` 包提供。
+- Windows、macOS 和 Linux 统一使用 `~/.mail-calendar-skill/` 下的本地 JSON 文件。
+- 非敏感设置与明文凭据分文件保存，所有协议代码通过同一个访问层取得运行时配置。
+- CLI 只使用 Python 标准库，没有可选凭据依赖。
 
 ## 工作方式
 
@@ -43,6 +44,9 @@ mail-calendar-skill/
     ├── SKILL.md
     ├── agents/
     │   └── openai.yaml
+    ├── examples/
+    │   ├── credentials.example.json
+    │   └── settings.example.json
     ├── references/
     │   ├── commands.md
     │   ├── configuration.md
@@ -61,7 +65,6 @@ mail-calendar-skill/
 - 能访问目标邮箱的 IMAP 服务
 - 能访问目标日历的 CalDAV 服务
 - Codex（使用 Skill 时）
-- `keyring`（推荐，用于安全保存密码或授权码）
 
 使用前需要在邮箱服务商后台启用 IMAP。QQ、163、126 等邮箱通常应使用服务商签发的客户端授权码，不要使用网页登录密码。Gmail 和 Outlook 的默认预设使用 OAuth2 access token。
 
@@ -95,33 +98,16 @@ Skill 的目录结构和加载位置可参考 [OpenAI 官方 Skills 文档](http
 
 ## 保存凭据
 
-推荐安装 `keyring`：
-
-```bash
-python -m pip install keyring
-```
-
-如果邮箱和日历使用同一个账号，并且服务商允许两种协议共用同一个密码或授权码，只需保存一次：
-
-```bash
-python -m keyring set mail-calendar person@example.com
-```
-
-命令会交互式询问密码或授权码。邮箱和日历配置都引用同一个条目：
+`config init` 会在终端中交互式读取邮箱和日历密码、客户端授权码或 OAuth token，不会把它们放进命令行参数。生成的文件固定为：
 
 ```text
-keyring:mail-calendar:person@example.com
+~/.mail-calendar-skill/
+├── settings.json       # 服务器、账号、认证方式等非敏感设置
+├── credentials.json    # 明文密码、授权码或 token
+└── state.json          # 邮件扫描和处理状态
 ```
 
-只有在邮箱和日历使用不同账号、不同授权码或不同类型的 OAuth token 时，才需要分别保存两个 keyring 条目。
-
-不同系统使用对应的系统凭据存储：
-
-- Windows：Windows 凭据管理器
-- macOS：钥匙串访问（Keychain）
-- Linux：Secret Service 或 KWallet，具体取决于桌面环境
-
-也可以使用 `env:VARIABLE_NAME` 从环境变量读取凭据。不要把明文密码、授权码或 token 提交到 Git 仓库。
+当前版本暂不加密 `credentials.json`。macOS/Linux 会把目录设为 `0700`、凭据文件设为 `0600`；Windows 使用用户主目录，并通过系统自带的 ACL 工具尽力限制为当前用户、SYSTEM 和 Administrators，不引入额外依赖。不要提交、同步或分享真实的 `credentials.json`。
 
 ## 初始化配置
 
@@ -145,11 +131,12 @@ python scripts/mailcal.py provider show calendar qq
 python scripts/mailcal.py config init \
   --email person@qq.com \
   --mail-provider qq \
-  --mail-secret-ref keyring:mail-calendar:person@qq.com \
   --calendar-provider qq \
   --calendar-user person@qq.com \
-  --calendar-secret-ref keyring:mail-calendar:person@qq.com
+  --reuse-mail-secret
 ```
+
+命令会提示输入邮箱凭据；`--reuse-mail-secret` 表示日历使用同一份凭据。没有该选项时会分别提示输入两份凭据。
 
 测试连接：
 
@@ -163,7 +150,7 @@ python scripts/mailcal.py config test
 python scripts/mailcal.py calendar list
 ```
 
-然后把选中日历的 `url` 写入本地 `config.json` 的 `calendar.collection_url`。
+然后把选中日历的 `url` 写入本地 `~/.mail-calendar-skill/settings.json` 的 `calendar.collection_url`。
 
 完整配置说明见 [`configuration.md`](mail-calendar/references/configuration.md)。
 
@@ -222,15 +209,15 @@ python scripts/mailcal.py mail state
 
 ## 配置和运行数据
 
-默认配置目录：
+所有系统都通过 Python 的用户 home 解析同一目录：
 
-| 系统 | 配置文件 | 处理状态 |
-|---|---|---|
-| Windows | `%APPDATA%\mail-calendar\config.json` | `%APPDATA%\mail-calendar\state.json` |
-| macOS | `~/Library/Application Support/mail-calendar/config.json` | `~/Library/Application Support/mail-calendar/state.json` |
-| Linux | `${XDG_CONFIG_HOME:-~/.config}/mail-calendar/config.json` | `${XDG_CONFIG_HOME:-~/.config}/mail-calendar/state.json` |
+| 文件 | 内容 |
+|---|---|
+| `~/.mail-calendar-skill/settings.json` | 非敏感服务器和账号设置 |
+| `~/.mail-calendar-skill/credentials.json` | 明文密码、授权码或 token |
+| `~/.mail-calendar-skill/state.json` | 邮件 UID、部分邮件头和处理结果 |
 
-`config.json` 只保存服务器设置和密钥引用。`state.json` 不保存密码，但会保存邮件 UID、部分邮件头以及处理结果，因此也应视为用户私有数据。
+不支持其他旧路径、路径环境变量、命令行路径覆盖或旧凭据字段，也不会自动迁移旧配置。示例见 [`mail-calendar/examples/`](mail-calendar/examples/)。
 
 ## 增量处理与失败恢复
 
@@ -260,6 +247,7 @@ python mail-calendar/scripts/mailcal.py config test
 ## 当前边界
 
 - 每次安装配置一个邮箱和一个日历。
+- 凭据当前以明文保存在用户目录内，安全边界是本机用户账户和文件权限。
 - CLI 不负责 OAuth 登录页面、授权流程或 token 自动刷新。
 - 附件只返回文件名、类型和大小等元数据，不下载附件内容。
 - 不在 CLI 中固化邮件分类或日程提取规则，具体目标由用户提示词决定。

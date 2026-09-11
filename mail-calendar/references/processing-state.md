@@ -4,13 +4,7 @@ CLI 使用一个本地 JSON 文件保存 IMAP 游标和邮件处理结果。后�
 
 ## 保存位置
 
-`state.json` 默认保存在用户的 `config.json` 旁边：
-
-- Windows：`%APPDATA%\mail-calendar\state.json`
-- macOS：`~/Library/Application Support/mail-calendar/state.json`
-- Linux：`${XDG_CONFIG_HOME:-~/.config}/mail-calendar/state.json`
-
-可以设置 `MAILCAL_STATE`，或传入 `--state PATH` 更改位置。该文件属于用户运行数据，不应放进或随 Skill 分发。更新时先写入同目录临时文件，再进行原子替换，避免进程中断后留下不完整的 JSON。
+`state.json` 在所有系统上都固定保存在 `~/.mail-calendar-skill/state.json`。该文件属于用户运行数据，不应放进或随 Skill 分发。更新时先写入同目录临时文件，再进行原子替换，避免进程中断后留下不完整的 JSON。
 
 ## 处理流程
 

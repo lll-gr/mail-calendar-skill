@@ -14,10 +14,12 @@ import json
 import os
 import re
 import ssl
+import subprocess
 import sys
 import tempfile
 import uuid
 import xml.etree.ElementTree as ET
+from getpass import getpass
 from dataclasses import dataclass
 from email.header import decode_header, make_header
 from email.message import Message
@@ -29,7 +31,11 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
+APP_DIRECTORY_NAME = ".mail-calendar-skill"
+SETTINGS_FILENAME = "settings.json"
+CREDENTIALS_FILENAME = "credentials.json"
+STATE_FILENAME = "state.json"
 DAV = "DAV:"
 CALDAV = "urn:ietf:params:xml:ns:caldav"
 ET.register_namespace("d", DAV)
@@ -81,76 +87,81 @@ def emit(data: Any) -> None:
     print(json.dumps({"ok": True, "data": data}, ensure_ascii=False, indent=2))
 
 
-def default_config_path() -> Path:
-    override = os.environ.get("MAILCAL_CONFIG")
-    if override:
-        return Path(override).expanduser()
-    if sys.platform == "win32":
-        root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    elif sys.platform == "darwin":
-        root = Path.home() / "Library" / "Application Support"
-    else:
-        root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return root / "mail-calendar" / "config.json"
+def storage_directory() -> Path:
+    """Return the one cross-platform storage root for this skill."""
+    return Path.home() / APP_DIRECTORY_NAME
 
 
-def config_path(args: argparse.Namespace) -> Path:
-    return Path(args.config).expanduser() if getattr(args, "config", None) else default_config_path()
+def _tighten_windows_acl(path: Path, *, directory: bool) -> bool:
+    """Best-effort ACL hardening using Windows built-ins only."""
+    try:
+        identity = subprocess.run(
+            ["whoami"], capture_output=True, text=True, check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip()
+        if not identity:
+            return False
+        inherit = "(OI)(CI)F" if directory else "F"
+        common = {"capture_output": True, "text": True,
+                  "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        granted = subprocess.run(
+            ["icacls", str(path), "/grant:r", f"{identity}:{inherit}",
+             f"*S-1-5-18:{inherit}", f"*S-1-5-32-544:{inherit}"],
+            **common,
+        )
+        if granted.returncode != 0:
+            return False
+        restricted = subprocess.run(["icacls", str(path), "/inheritance:r"], **common)
+        return restricted.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
-def load_config(args: argparse.Namespace) -> dict[str, Any]:
-    path = config_path(args)
+def _make_private(path: Path, *, directory: bool, platform: str | None = None) -> None:
+    platform = os.name if platform is None else platform
+    if platform == "nt":
+        _tighten_windows_acl(path, directory=directory)
+        return
+    try:
+        os.chmod(path, 0o700 if directory else 0o600)
+    except OSError as exc:
+        raise ConfigError(f"Cannot set private permissions on {path}: {exc}") from exc
+
+
+def _read_json(path: Path, label: str) -> dict[str, Any]:
     if not path.exists():
-        raise ConfigError(f"Configuration not found: {path}. Run 'config init' first.")
+        raise ConfigError(f"{label} not found: {path}. Run 'config init' first.")
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ConfigError(f"Cannot read configuration {path}: {exc}") from exc
+        raise ConfigError(f"Cannot read {label.lower()} {path}: {exc}") from exc
     if not isinstance(value, dict):
-        raise ConfigError("Configuration root must be a JSON object")
+        raise ConfigError(f"{label} root must be a JSON object")
     return value
 
 
-def save_config(path: Path, value: dict[str, Any]) -> None:
+def _write_json(path: Path, value: dict[str, Any], *, private_file: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _make_private(path.parent, directory=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=path.name + ".",
+        suffix=".tmp", delete=False,
+    )
+    temporary = Path(handle.name)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-
-
-def state_path(args: argparse.Namespace) -> Path:
-    if getattr(args, "state", None):
-        return Path(args.state).expanduser()
-    override = os.environ.get("MAILCAL_STATE")
-    if override:
-        return Path(override).expanduser()
-    return config_path(args).parent / "state.json"
-
-
-def resolve_secret(reference: str) -> str:
-    if not reference:
-        raise ConfigError("Missing secret reference")
-    if reference.startswith("env:"):
-        name = reference[4:]
-        value = os.environ.get(name)
-        if value is None:
-            raise ConfigError(f"Environment variable is not set: {name}")
-        return value
-    if reference.startswith("keyring:"):
-        parts = reference.split(":", 2)
-        if len(parts) != 3 or not parts[1] or not parts[2]:
-            raise ConfigError("Keyring reference must be keyring:SERVICE:USERNAME")
-        try:
-            import keyring  # type: ignore
-        except ImportError as exc:
-            raise ConfigError("The optional 'keyring' package is required for keyring references") from exc
-        value = keyring.get_password(parts[1], parts[2])
-        if value is None:
-            raise ConfigError(f"No credential found in keyring for {parts[1]}:{parts[2]}")
-        return value
-    raise ConfigError("Secret references must start with env: or keyring:")
+        with handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if private_file:
+            _make_private(temporary, directory=False)
+        os.replace(temporary, path)
+        if private_file:
+            _make_private(path, directory=False)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def detect_mail_provider(address: str) -> str:
@@ -163,28 +174,117 @@ def detect_mail_provider(address: str) -> str:
     return "generic"
 
 
-def mail_settings(config: dict[str, Any]) -> dict[str, Any]:
-    section = config.get("mail")
+def validate_mail_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    section = settings.get("mail")
     if not isinstance(section, dict):
         raise ConfigError("Missing mail configuration")
-    required = ("address", "host", "port", "security", "auth", "secret_ref")
+    required = ("address", "host", "port", "security", "auth")
     missing = [key for key in required if section.get(key) in (None, "")]
     if missing:
         raise ConfigError("Missing mail fields: " + ", ".join(missing))
-    return section
+    allowed = {"provider", "address", "host", "port", "security", "auth"}
+    unsupported = sorted(set(section) - allowed)
+    if unsupported:
+        raise ConfigError("Unsupported mail fields: " + ", ".join(unsupported))
+    if section["security"] not in {"ssl", "starttls", "plain"}:
+        raise ConfigError(f"Unsupported IMAP security mode: {section['security']}")
+    if section["auth"] not in {"password", "xoauth2"}:
+        raise ConfigError(f"Unsupported IMAP auth mode: {section['auth']}")
+    if isinstance(section["port"], bool) or not isinstance(section["port"], int) or not 1 <= section["port"] <= 65535:
+        raise ConfigError("Mail port must be an integer from 1 to 65535")
+    return dict(section)
 
 
-def calendar_settings(config: dict[str, Any]) -> dict[str, Any]:
-    section = config.get("calendar")
+def validate_calendar_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    section = settings.get("calendar")
     if not isinstance(section, dict):
         raise ConfigError("Missing calendar configuration")
-    required = ("base_url", "auth", "secret_ref")
+    required = ("base_url", "auth")
     missing = [key for key in required if section.get(key) in (None, "")]
     if missing:
         raise ConfigError("Missing calendar fields: " + ", ".join(missing))
+    allowed = {"provider", "base_url", "collection_url", "auth", "username"}
+    unsupported = sorted(set(section) - allowed)
+    if unsupported:
+        raise ConfigError("Unsupported calendar fields: " + ", ".join(unsupported))
+    if section["auth"] not in {"basic", "bearer"}:
+        raise ConfigError(f"Unsupported CalDAV auth mode: {section['auth']}")
     if section["auth"] == "basic" and not section.get("username"):
         raise ConfigError("Calendar username is required for basic authentication")
-    return section
+    return dict(section)
+
+
+def validate_settings_document(value: dict[str, Any]) -> None:
+    allowed = {"version", "timezone", "mail", "calendar"}
+    unsupported = sorted(set(value) - allowed)
+    if unsupported:
+        raise ConfigError("Unsupported settings fields: " + ", ".join(unsupported))
+    if value.get("version") != 1:
+        raise ConfigError("Unsupported settings version")
+    if not isinstance(value.get("timezone"), str) or not value["timezone"]:
+        raise ConfigError("Missing settings field: timezone")
+    validate_mail_settings(value)
+    validate_calendar_settings(value)
+
+
+def validate_credentials_document(value: dict[str, Any]) -> None:
+    allowed = {"version", "mail", "calendar"}
+    unsupported = sorted(set(value) - allowed)
+    if unsupported:
+        raise ConfigError("Unsupported credentials fields: " + ", ".join(unsupported))
+    if value.get("version") != 1:
+        raise ConfigError("Unsupported credentials version")
+    for service in ("mail", "calendar"):
+        section = value.get(service)
+        if not isinstance(section, dict) or set(section) != {"secret"}:
+            raise ConfigError(f"Invalid {service} credentials in credentials file")
+        if not isinstance(section["secret"], str) or not section["secret"]:
+            raise ConfigError(f"Missing {service} secret in credentials file")
+
+
+class ConfigStore:
+    """The only access layer for settings, credentials, and runtime paths."""
+
+    def __init__(self, root: Path | None = None):
+        self.root = root if root is not None else storage_directory()
+        self.settings_path = self.root / SETTINGS_FILENAME
+        self.credentials_path = self.root / CREDENTIALS_FILENAME
+        self.state_path = self.root / STATE_FILENAME
+
+    def load_settings(self) -> dict[str, Any]:
+        value = _read_json(self.settings_path, "Settings")
+        validate_settings_document(value)
+        return value
+
+    def load_credentials(self) -> dict[str, Any]:
+        value = _read_json(self.credentials_path, "Credentials")
+        validate_credentials_document(value)
+        return value
+
+    def mail(self, *, with_secret: bool = True) -> dict[str, Any]:
+        result = validate_mail_settings(self.load_settings())
+        if with_secret:
+            result["secret"] = self.load_credentials()["mail"]["secret"]
+        return result
+
+    def calendar(self, *, with_secret: bool = True) -> dict[str, Any]:
+        result = validate_calendar_settings(self.load_settings())
+        if with_secret:
+            result["secret"] = self.load_credentials()["calendar"]["secret"]
+        return result
+
+    def initialize(self, settings: dict[str, Any], credentials: dict[str, Any], *, force: bool) -> None:
+        self.check_initialize(force=force)
+        validate_settings_document(settings)
+        validate_credentials_document(credentials)
+        _write_json(self.settings_path, settings, private_file=False)
+        _write_json(self.credentials_path, credentials, private_file=True)
+
+    def check_initialize(self, *, force: bool) -> None:
+        existing = [path for path in (self.settings_path, self.credentials_path) if path.exists()]
+        if existing and not force:
+            names = ", ".join(str(path) for path in existing)
+            raise InputError(f"Configuration already exists: {names}. Use --force to replace it.")
 
 
 def mailbox_key(settings: dict[str, Any]) -> str:
@@ -197,6 +297,7 @@ class StateStore:
 
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
+        _make_private(path.parent, directory=True)
         self.path = path
         self.data: dict[str, Any] = {"version": 1, "mailbox_key": "", "folders": {}}
         if path.exists():
@@ -224,10 +325,7 @@ class StateStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self.path)
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
+            _make_private(self.path, directory=False)
         finally:
             if temporary.exists():
                 temporary.unlink()
@@ -481,7 +579,7 @@ class IMAPSession:
 
     @classmethod
     def connect(cls, settings: dict[str, Any]) -> "IMAPSession":
-        secret = resolve_secret(str(settings["secret_ref"]))
+        secret = str(settings["secret"])
         host = str(settings["host"])
         port = int(settings["port"])
         try:
@@ -625,9 +723,9 @@ def imap_get(settings: dict[str, Any], folder: str, uid: str) -> dict[str, Any]:
         session.close()
 
 
-def imap_pending(settings: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def imap_pending(settings: dict[str, Any], args: argparse.Namespace, state_file: Path) -> dict[str, Any]:
     key = mailbox_key(settings)
-    store = StateStore(state_path(args))
+    store = StateStore(state_file)
     session = IMAPSession.connect(settings)
     try:
         session.select(args.folder)
@@ -672,8 +770,8 @@ def read_ack_input(path: str) -> list[dict[str, Any]]:
     return value
 
 
-def state_ack(settings: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    store = StateStore(state_path(args))
+def state_ack(settings: dict[str, Any], args: argparse.Namespace, state_file: Path) -> dict[str, Any]:
+    store = StateStore(state_file)
     try:
         key = mailbox_key(settings)
         uidvalidity = store.current_uidvalidity(key, args.folder)
@@ -689,8 +787,8 @@ def state_ack(settings: dict[str, Any], args: argparse.Namespace) -> dict[str, A
         store.close()
 
 
-def state_retry(settings: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    store = StateStore(state_path(args))
+def state_retry(settings: dict[str, Any], args: argparse.Namespace, state_file: Path) -> dict[str, Any]:
+    store = StateStore(state_file)
     try:
         key = mailbox_key(settings)
         uidvalidity = store.current_uidvalidity(key, args.folder)
@@ -700,8 +798,8 @@ def state_retry(settings: dict[str, Any], args: argparse.Namespace) -> dict[str,
         store.close()
 
 
-def state_summary(settings: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
-    store = StateStore(state_path(args))
+def state_summary(settings: dict[str, Any], args: argparse.Namespace, state_file: Path) -> dict[str, Any]:
+    store = StateStore(state_file)
     try:
         return store.summary(mailbox_key(settings), args.folder)
     finally:
@@ -709,7 +807,7 @@ def state_summary(settings: dict[str, Any], args: argparse.Namespace) -> dict[st
 
 
 def auth_headers(settings: dict[str, Any]) -> dict[str, str]:
-    secret = resolve_secret(str(settings["secret_ref"]))
+    secret = str(settings["secret"])
     if settings["auth"] == "basic":
         raw = f"{settings['username']}:{secret}".encode("utf-8")
         return {"Authorization": "Basic " + base64.b64encode(raw).decode("ascii")}
@@ -981,18 +1079,29 @@ def cmd_provider(args: argparse.Namespace) -> Any:
     return {"kind": args.kind, "name": args.name, **source[args.name]}
 
 
-def cmd_config_init(args: argparse.Namespace) -> Any:
+def _prompt_secret(label: str) -> str:
+    try:
+        value = getpass(label)
+    except (EOFError, OSError) as exc:
+        raise InputError("Cannot read credentials interactively; run 'config init' in a terminal") from exc
+    if not value:
+        raise InputError("Credentials cannot be empty")
+    return value
+
+
+def cmd_config_init(args: argparse.Namespace, store: ConfigStore) -> Any:
+    store.check_initialize(force=args.force)
     provider = detect_mail_provider(args.email) if args.mail_provider == "auto" else args.mail_provider
     if provider == "generic":
         if not args.mail_host:
             raise InputError("Unknown email domain; provide --mail-host for the generic provider")
         mail = {"provider": "generic", "address": args.email, "host": args.mail_host, "port": args.mail_port or 993,
-                "security": args.mail_security or "ssl", "auth": args.mail_auth or "password", "secret_ref": args.mail_secret_ref}
+                "security": args.mail_security or "ssl", "auth": args.mail_auth or "password"}
     else:
         if provider not in MAIL_PROVIDERS:
             raise InputError(f"Unknown mail provider: {provider}")
-        mail = {"provider": provider, "address": args.email, **{k: v for k, v in MAIL_PROVIDERS[provider].items() if k != "domains"},
-                "secret_ref": args.mail_secret_ref}
+        mail = {"provider": provider, "address": args.email,
+                **{k: v for k, v in MAIL_PROVIDERS[provider].items() if k != "domains"}}
         for key, value in (("host", args.mail_host), ("port", args.mail_port), ("security", args.mail_security), ("auth", args.mail_auth)):
             if value is not None:
                 mail[key] = value
@@ -1009,25 +1118,40 @@ def cmd_config_init(args: argparse.Namespace) -> Any:
         calendar["username"] = args.calendar_user
     if args.calendar_auth:
         calendar["auth"] = args.calendar_auth
-    calendar["secret_ref"] = args.calendar_secret_ref
     if calendar["auth"] == "basic" and not calendar.get("username"):
         raise InputError("Basic CalDAV authentication requires --calendar-user")
-    value = {"version": 1, "timezone": args.timezone, "mail": mail, "calendar": calendar}
-    path = config_path(args)
-    if path.exists() and not args.force:
-        raise InputError(f"Configuration already exists: {path}. Use --force to replace it.")
-    save_config(path, value)
-    return {"path": str(path), "mail_provider": provider, "calendar_provider": args.calendar_provider}
+    mail_label = "Mail OAuth token: " if mail["auth"] == "xoauth2" else "Mail password or app password: "
+    calendar_label = "Calendar OAuth token: " if calendar["auth"] == "bearer" else "Calendar password or app password: "
+    mail_secret = _prompt_secret(mail_label)
+    calendar_secret = mail_secret if args.reuse_mail_secret else _prompt_secret(calendar_label)
+    settings = {"version": 1, "timezone": args.timezone, "mail": mail, "calendar": calendar}
+    credentials = {
+        "version": 1,
+        "mail": {"secret": mail_secret},
+        "calendar": {"secret": calendar_secret},
+    }
+    store.initialize(settings, credentials, force=args.force)
+    return {
+        "settings_path": str(store.settings_path),
+        "credentials_path": str(store.credentials_path),
+        "mail_provider": provider,
+        "calendar_provider": args.calendar_provider,
+    }
 
 
-def cmd_config(args: argparse.Namespace) -> Any:
+def cmd_config(args: argparse.Namespace, store: ConfigStore) -> Any:
     if args.config_command == "init":
-        return cmd_config_init(args)
-    config = load_config(args)
+        return cmd_config_init(args, store)
     if args.config_command == "show":
-        return {"path": str(config_path(args)), "config": config}
-    mail = mail_settings(config)
-    calendar = calendar_settings(config)
+        return {
+            "directory": str(store.root),
+            "settings_path": str(store.settings_path),
+            "credentials_path": str(store.credentials_path),
+            "credentials_present": store.credentials_path.exists(),
+            "settings": store.load_settings(),
+        }
+    mail = store.mail()
+    calendar = store.calendar()
     session = IMAPSession.connect(mail)
     try:
         imap_result = {"ok": True, "server": f"{mail['host']}:{mail['port']}"}
@@ -1050,8 +1174,6 @@ def read_event_input(path: str) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mailcal", description=__doc__)
-    parser.add_argument("--config", help="Configuration path; overrides MAILCAL_CONFIG")
-    parser.add_argument("--state", help="State JSON file path; overrides MAILCAL_STATE")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     groups = parser.add_subparsers(dest="group", required=True)
 
@@ -1071,13 +1193,13 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--mail-port", type=int)
     init.add_argument("--mail-security", choices=["ssl", "starttls", "plain"])
     init.add_argument("--mail-auth", choices=["password", "xoauth2"])
-    init.add_argument("--mail-secret-ref", required=True)
     init.add_argument("--calendar-provider", choices=sorted(CALENDAR_PROVIDERS), required=True)
     init.add_argument("--calendar-url")
     init.add_argument("--calendar-collection-url")
     init.add_argument("--calendar-user")
     init.add_argument("--calendar-auth", choices=["basic", "bearer"])
-    init.add_argument("--calendar-secret-ref", required=True)
+    init.add_argument("--reuse-mail-secret", action="store_true",
+                      help="Use the mail password or token for the calendar too")
     init.add_argument("--timezone", default="Asia/Shanghai")
     init.add_argument("--force", action="store_true")
     config_sub.add_parser("show", help="Show local configuration without resolving secrets")
@@ -1127,13 +1249,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def dispatch(args: argparse.Namespace) -> Any:
+    store = ConfigStore()
     if args.group == "provider":
         return cmd_provider(args)
     if args.group == "config":
-        return cmd_config(args)
-    config = load_config(args)
+        return cmd_config(args, store)
     if args.group == "mail":
-        settings = mail_settings(config)
+        needs_secret = args.mail_command in {"folders", "search", "pending", "get"}
+        settings = store.mail(with_secret=needs_secret)
         if args.mail_command == "folders":
             return imap_folders(settings)
         if args.mail_command == "search":
@@ -1143,15 +1266,15 @@ def dispatch(args: argparse.Namespace) -> Any:
         if args.mail_command == "pending":
             if args.limit < 1 or args.scan_limit < 1:
                 raise InputError("--limit and --scan-limit must be positive")
-            return imap_pending(settings, args)
+            return imap_pending(settings, args, store.state_path)
         if args.mail_command == "get":
             return imap_get(settings, args.folder, args.uid)
         if args.mail_command == "ack":
-            return state_ack(settings, args)
+            return state_ack(settings, args, store.state_path)
         if args.mail_command == "retry":
-            return state_retry(settings, args)
-        return state_summary(settings, args)
-    settings = calendar_settings(config)
+            return state_retry(settings, args, store.state_path)
+        return state_summary(settings, args, store.state_path)
+    settings = store.calendar()
     if args.calendar_command == "list":
         return calendar_list(settings)
     if args.calendar_command == "create":
