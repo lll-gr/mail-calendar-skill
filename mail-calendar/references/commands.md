@@ -3,7 +3,7 @@
 ## 基本格式
 
 ```text
-python scripts/mailcal.py <命令组> <子命令> [参数]
+python -X utf8 scripts/mailcal.py <命令组> <子命令> [参数]
 ```
 
 唯一的全局参数：
@@ -19,9 +19,9 @@ python scripts/mailcal.py <命令组> <子命令> [参数]
 ## 服务商预设
 
 ```text
-python scripts/mailcal.py provider list
-python scripts/mailcal.py provider show mail qq
-python scripts/mailcal.py provider show calendar qq
+python -X utf8 scripts/mailcal.py provider list
+python -X utf8 scripts/mailcal.py provider show mail qq
+python -X utf8 scripts/mailcal.py provider show calendar qq
 ```
 
 `provider show` 的第一个位置参数是 `mail` 或 `calendar`，第二个位置参数是预设名称。
@@ -31,7 +31,7 @@ python scripts/mailcal.py provider show calendar qq
 ### `config init`
 
 ```text
-python scripts/mailcal.py config init --email person@qq.com --mail-provider qq --calendar-provider qq --calendar-user person@qq.com --reuse-mail-secret
+python -X utf8 scripts/mailcal.py config init --email person@qq.com --mail-provider qq --calendar-provider qq --calendar-user person@qq.com --reuse-mail-secret
 ```
 
 | 参数 | 是否必需 | 说明 |
@@ -56,8 +56,8 @@ CLI 会交互式隐藏读取凭据并写入 `credentials.json`。凭据文件格
 ### `config show` 和 `config test`
 
 ```text
-python scripts/mailcal.py config show
-python scripts/mailcal.py config test
+python -X utf8 scripts/mailcal.py config show
+python -X utf8 scripts/mailcal.py config test
 ```
 
 - `config show` 输出固定路径、非敏感设置和凭据文件是否存在，不读取或输出实际密码/token。
@@ -68,7 +68,7 @@ python scripts/mailcal.py config test
 ### `mail folders`
 
 ```text
-python scripts/mailcal.py mail folders
+python -X utf8 scripts/mailcal.py mail folders
 ```
 
 列出服务器上的 IMAP 文件夹。其他邮件命令默认读取 `INBOX`；处理其他文件夹时使用 `--folder NAME`。
@@ -76,7 +76,7 @@ python scripts/mailcal.py mail folders
 ### `mail pending`
 
 ```text
-python scripts/mailcal.py mail pending --since 30d --limit 50 --scan-limit 200
+python -X utf8 scripts/mailcal.py mail pending --since 30d --limit 50 --scan-limit 200
 ```
 
 这是定期增量处理的首选命令。它扫描新增邮件头，并返回尚未确认完成的邮件。
@@ -93,8 +93,8 @@ python scripts/mailcal.py mail pending --since 30d --limit 50 --scan-limit 200
 ### `mail search`
 
 ```text
-python scripts/mailcal.py mail search --since 2026-08-01 --subject 会议 --from example.com --limit 20
-python scripts/mailcal.py mail search --since 2w --unseen
+python -X utf8 scripts/mailcal.py mail search --since 2026-08-01 --subject 会议 --from example.com --limit 20
+python -X utf8 scripts/mailcal.py mail search --since 2w --unseen
 ```
 
 用于用户明确要求的历史或临时检索，不修改增量处理状态。
@@ -111,8 +111,8 @@ python scripts/mailcal.py mail search --since 2w --unseen
 ### `mail get`
 
 ```text
-python scripts/mailcal.py mail get --uid 123
-python scripts/mailcal.py mail get --folder 通知 --uid 123
+python -X utf8 scripts/mailcal.py mail get --uid 123
+python -X utf8 scripts/mailcal.py mail get --folder 通知 --uid 123
 ```
 
 `--uid UID` 必需，`--folder NAME` 默认 `INBOX`。返回邮件头、纯文本正文和附件元数据，不下载附件内容，也不会把邮件标记为已读。
@@ -122,9 +122,9 @@ python scripts/mailcal.py mail get --folder 通知 --uid 123
 处理完成后确认一封或多封已登记的邮件：
 
 ```text
-python scripts/mailcal.py mail ack --uid 123 --outcome ignored
-python scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
-python scripts/mailcal.py mail ack --uid 125 --uid 126 --outcome processed
+python -X utf8 scripts/mailcal.py mail ack --uid 123 --outcome ignored
+python -X utf8 scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
+python -X utf8 scripts/mailcal.py mail ack --uid 125 --uid 126 --outcome processed
 ```
 
 | 参数 | 说明 |
@@ -147,9 +147,9 @@ python scripts/mailcal.py mail ack --uid 125 --uid 126 --outcome processed
 ### `mail retry` 和 `mail state`
 
 ```text
-python scripts/mailcal.py mail retry --uid 124
-python scripts/mailcal.py mail retry --uid 124 --uid 125
-python scripts/mailcal.py mail state
+python -X utf8 scripts/mailcal.py mail retry --uid 124
+python -X utf8 scripts/mailcal.py mail retry --uid 124 --uid 125
+python -X utf8 scripts/mailcal.py mail state
 ```
 
 - `mail retry` 把一个或多个已确认 UID 恢复为待处理；`--uid` 可以重复，`--folder` 默认 `INBOX`。
@@ -160,7 +160,7 @@ python scripts/mailcal.py mail state
 ### `calendar list`
 
 ```text
-python scripts/mailcal.py calendar list
+python -X utf8 scripts/mailcal.py calendar list
 ```
 
 发现当前账号可访问的 CalDAV 日历集合。需要固定目标日历时，把返回的 `url` 保存为 `calendar.collection_url`。
@@ -168,9 +168,9 @@ python scripts/mailcal.py calendar list
 ### `calendar create`
 
 ```text
-python scripts/mailcal.py calendar create --input event.json
-python scripts/mailcal.py calendar create --input -
-python scripts/mailcal.py calendar create --input event.json --calendar-url CALENDAR_COLLECTION_URL
+python -X utf8 scripts/mailcal.py calendar create --input event.json
+python -X utf8 scripts/mailcal.py calendar create --input -
+python -X utf8 scripts/mailcal.py calendar create --input event.json --calendar-url CALENDAR_COLLECTION_URL
 ```
 
 | 参数 | 说明 |
@@ -183,8 +183,8 @@ python scripts/mailcal.py calendar create --input event.json --calendar-url CALE
 ### `calendar delete`
 
 ```text
-python scripts/mailcal.py calendar delete --uid EVENT_UID
-python scripts/mailcal.py calendar delete --url EVENT_RESOURCE_URL
+python -X utf8 scripts/mailcal.py calendar delete --uid EVENT_UID
+python -X utf8 scripts/mailcal.py calendar delete --url EVENT_RESOURCE_URL
 ```
 
 | 参数 | 说明 |

@@ -11,7 +11,7 @@ CLI 使用一个本地 JSON 文件保存 IMAP 游标和邮件处理结果。后�
 发现新增邮件，并返回仍待处理的邮件头：
 
 ```text
-python scripts/mailcal.py mail pending --since 30d --limit 50
+python -X utf8 scripts/mailcal.py mail pending --since 30d --limit 50
 ```
 
 `mail pending` 会扫描日期范围内的所有新增邮件。不要对这个基于游标的命令增加发件人、主题或未读过滤，否则推进过滤后的游标可能永久跳过邮件。由模型按照用户当前的要求判断返回邮件是否相关；临时的筛选检索使用 `mail search`。
@@ -26,8 +26,8 @@ python scripts/mailcal.py mail pending --since 30d --limit 50
 只对可能相关的邮件执行 `mail get` 读取正文。完整处理一封邮件后再进行确认：
 
 ```text
-python scripts/mailcal.py mail ack --uid 123 --outcome ignored
-python scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
+python -X utf8 scripts/mailcal.py mail ack --uid 123 --outcome ignored
+python -X utf8 scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
 ```
 
 批量确认时，准备一个数组并通过 `--input` 传入：
@@ -40,7 +40,7 @@ python scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT
 ```
 
 ```text
-python scripts/mailcal.py mail ack --input acknowledgements.json
+python -X utf8 scripts/mailcal.py mail ack --input acknowledgements.json
 ```
 
 如果一次运行在确认前中断，该邮件会保持待处理状态，并在下次运行时再次出现。
@@ -48,13 +48,13 @@ python scripts/mailcal.py mail ack --input acknowledgements.json
 查看游标和数量：
 
 ```text
-python scripts/mailcal.py mail state
+python -X utf8 scripts/mailcal.py mail state
 ```
 
 需要重新处理一封已确认邮件时：
 
 ```text
-python scripts/mailcal.py mail retry --uid 124
+python -X utf8 scripts/mailcal.py mail retry --uid 124
 ```
 
 `UIDVALIDITY` 用于防止服务端重复使用旧 UID。当它发生变化时，CLI 会开始一代新的游标，不会把旧 UID 当作当前邮件。

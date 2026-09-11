@@ -120,15 +120,15 @@ cd mail-calendar
 查看支持的服务商：
 
 ```bash
-python scripts/mailcal.py provider list
-python scripts/mailcal.py provider show mail qq
-python scripts/mailcal.py provider show calendar qq
+python -X utf8 scripts/mailcal.py provider list
+python -X utf8 scripts/mailcal.py provider show mail qq
+python -X utf8 scripts/mailcal.py provider show calendar qq
 ```
 
 以同一个 QQ 账号同时连接邮箱和日历为例：
 
 ```bash
-python scripts/mailcal.py config init \
+python -X utf8 scripts/mailcal.py config init \
   --email person@qq.com \
   --mail-provider qq \
   --calendar-provider qq \
@@ -141,13 +141,13 @@ python scripts/mailcal.py config init \
 测试连接：
 
 ```bash
-python scripts/mailcal.py config test
+python -X utf8 scripts/mailcal.py config test
 ```
 
 如果账号中有多个日历，可以先查看列表：
 
 ```bash
-python scripts/mailcal.py calendar list
+python -X utf8 scripts/mailcal.py calendar list
 ```
 
 然后把选中日历的 `url` 写入本地 `~/.mail-calendar-skill/settings.json` 的 `calendar.collection_url`。
@@ -187,26 +187,26 @@ Codex 定时任务访问 IMAP/CalDAV 时需要网络权限，维护 `~/.mail-cal
 获取新增且尚未处理的邮件头：
 
 ```bash
-python scripts/mailcal.py mail pending --since 30d --limit 50
+python -X utf8 scripts/mailcal.py mail pending --since 30d --limit 50
 ```
 
 读取一封邮件正文：
 
 ```bash
-python scripts/mailcal.py mail get --uid 123
+python -X utf8 scripts/mailcal.py mail get --uid 123
 ```
 
 把邮件标记为已处理：
 
 ```bash
-python scripts/mailcal.py mail ack --uid 123 --outcome ignored
-python scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
+python -X utf8 scripts/mailcal.py mail ack --uid 123 --outcome ignored
+python -X utf8 scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
 ```
 
 查看游标状态：
 
 ```bash
-python scripts/mailcal.py mail state
+python -X utf8 scripts/mailcal.py mail state
 ```
 
 详细参数见 [`commands.md`](mail-calendar/references/commands.md)，日程 JSON 格式见 [`event-json.md`](mail-calendar/references/event-json.md)。
@@ -239,13 +239,13 @@ python scripts/mailcal.py mail state
 在仓库根目录执行：
 
 ```bash
-python -m unittest discover -s mail-calendar/scripts -p "test_*.py" -v
+python -X utf8 -m unittest discover -s mail-calendar/scripts -p "test_*.py" -v
 ```
 
 测试使用本地模拟数据，不会连接真实邮箱或日历。实际账号配置完成后，请再执行：
 
 ```bash
-python mail-calendar/scripts/mailcal.py config test
+python -X utf8 mail-calendar/scripts/mailcal.py config test
 ```
 
 ## 当前边界

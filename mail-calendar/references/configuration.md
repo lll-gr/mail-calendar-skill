@@ -64,7 +64,7 @@
 优先使用服务商预设：
 
 ```text
-python scripts/mailcal.py config init \
+python -X utf8 scripts/mailcal.py config init \
   --email person@qq.com \
   --mail-provider qq \
   --calendar-provider qq \
@@ -89,19 +89,19 @@ Skill 本身不能授予网络或沙箱外文件权限，自动化任务也没�
 
 ```python
 prefix_rule(
-    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "config", "test"],
+    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "config", "test"],
     decision = "allow",
     justification = "Allow only the mail-calendar connectivity test outside the sandbox.",
 )
 
 prefix_rule(
-    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "mail", ["folders", "search", "pending", "get", "ack", "retry", "state"]],
+    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "mail", ["folders", "search", "pending", "get", "ack", "retry", "state"]],
     decision = "allow",
     justification = "Allow only mail-calendar IMAP and mail state operations outside the sandbox.",
 )
 
 prefix_rule(
-    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "calendar", ["list", "create", "delete"]],
+    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "calendar", ["list", "create", "delete"]],
     decision = "allow",
     justification = "Allow only mail-calendar CalDAV operations outside the sandbox.",
 )
@@ -122,7 +122,7 @@ prefix_rule(
 执行：
 
 ```text
-python scripts/mailcal.py calendar list
+python -X utf8 scripts/mailcal.py calendar list
 ```
 
 如果返回多个日历，把选中日历的 `url` 写入 `~/.mail-calendar-skill/settings.json` 的 `calendar.collection_url`。也可以在执行 `calendar create` 或 `calendar delete` 时传入 `--calendar-url`。

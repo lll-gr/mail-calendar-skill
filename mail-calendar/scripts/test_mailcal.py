@@ -191,7 +191,10 @@ class MailCalTests(unittest.TestCase):
             self.assertTrue(mailcal._tighten_windows_acl(Path(".mail-calendar-skill"), directory=True))
         self.assertEqual(run.call_count, 3)
         self.assertEqual(run.call_args_list[0].args[0], ["whoami"])
+        self.assertEqual(run.call_args_list[0].kwargs["encoding"], "oem")
         self.assertIn("desktop\\person:(OI)(CI)F", run.call_args_list[1].args[0])
+        self.assertIs(run.call_args_list[1].kwargs["stdout"], mailcal.subprocess.DEVNULL)
+        self.assertIs(run.call_args_list[1].kwargs["stderr"], mailcal.subprocess.DEVNULL)
         self.assertEqual(run.call_args_list[2].args[0][-1], "/inheritance:r")
 
     def test_windows_credentials_inherit_restricted_directory_acl(self):
