@@ -1,0 +1,4 @@
+interface:
+  display_name: "邮件日程助手"
+  short_description: "按用户要求从邮箱提取时间事项并同步到个人 CalDAV 日历"
+  default_prompt: "使用 $mail-calendar 按我的要求检查邮件，并把其中需要执行的时间事项同步到我的日历。"
