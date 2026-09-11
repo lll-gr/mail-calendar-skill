@@ -62,6 +62,8 @@ python scripts/mailcal.py config init \
 
 日历预设包括 `qq`、`google` 和 `generic`。Google CalDAV 使用 bearer token，集合地址中包含日历 ID。CLI 不负责获取或刷新 OAuth 令牌，应通过凭据引用提供当前令牌，或配合能够管理 OAuth 的凭据工具。
 
+当 CalDAV 基础地址只包含主机根地址时，CLI 会按 RFC 6764 尝试 `/.well-known/caldav`，跟随同源 HTTP 重定向到实际服务路径，并在标准入口不存在时回退到根地址。配置中已经包含明确服务路径时，优先使用该路径。
+
 预设只是默认值。生成配置后仍可修改主机、端口、安全方式、认证方式、基础地址和日历集合地址。
 
 ## 选择日历

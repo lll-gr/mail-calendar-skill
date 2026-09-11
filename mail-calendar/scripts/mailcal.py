@@ -25,7 +25,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 
@@ -718,43 +718,76 @@ def auth_headers(settings: dict[str, Any]) -> dict[str, str]:
     raise ConfigError(f"Unsupported CalDAV auth mode: {settings['auth']}")
 
 
-def dav_request(
+def _dav_request(
     settings: dict[str, Any], method: str, url: str, *, body: bytes | None = None,
     depth: str | None = None, content_type: str | None = None,
-) -> tuple[int, bytes, dict[str, str]]:
+) -> tuple[int, bytes, dict[str, str], str]:
     headers = {"User-Agent": f"mailcal/{VERSION}", **auth_headers(settings)}
     if depth is not None:
         headers["Depth"] = depth
     if content_type:
         headers["Content-Type"] = content_type
-    request = Request(url, data=body, headers=headers, method=method)
-    try:
-        with urlopen(request, timeout=30, context=ssl.create_default_context()) as response:
-            return response.status, response.read(), dict(response.headers.items())
-    except HTTPError as exc:
-        if exc.code == 404:
-            raise NotFoundError(f"CalDAV resource not found: {url}") from exc
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise ConnectionFailure(f"CalDAV {method} failed with HTTP {exc.code}: {detail}") from exc
-    except (URLError, OSError, ssl.SSLError) as exc:
-        raise ConnectionFailure(f"CalDAV {method} failed: {exc}") from exc
+    current_url = url
+    for _ in range(6):
+        request = Request(current_url, data=body, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=30, context=ssl.create_default_context()) as response:
+                return response.status, response.read(), dict(response.headers.items()), response.geturl()
+        except HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308}:
+                location = exc.headers.get("Location")
+                if not location:
+                    raise ConnectionFailure(f"CalDAV redirect from {current_url} has no Location header") from exc
+                redirected_url = urljoin(current_url, location)
+                source = urlsplit(current_url)
+                target = urlsplit(redirected_url)
+                if (source.scheme, source.netloc) != (target.scheme, target.netloc):
+                    raise ConnectionFailure(
+                        "CalDAV discovery redirected to a different origin; "
+                        f"configure the calendar base URL as {redirected_url}"
+                    ) from exc
+                current_url = redirected_url
+                continue
+            if exc.code == 404:
+                raise NotFoundError(f"CalDAV resource not found: {current_url}") from exc
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            raise ConnectionFailure(f"CalDAV {method} failed with HTTP {exc.code}: {detail}") from exc
+        except (URLError, OSError, ssl.SSLError) as exc:
+            raise ConnectionFailure(f"CalDAV {method} failed: {exc}") from exc
+    raise ConnectionFailure(f"CalDAV {method} exceeded the redirect limit: {url}")
 
 
-def propfind(settings: dict[str, Any], url: str, properties: list[tuple[str, str]], depth: str) -> ET.Element:
+def dav_request(
+    settings: dict[str, Any], method: str, url: str, *, body: bytes | None = None,
+    depth: str | None = None, content_type: str | None = None,
+) -> tuple[int, bytes, dict[str, str]]:
+    status, response_body, response_headers, _ = _dav_request(
+        settings, method, url, body=body, depth=depth, content_type=content_type
+    )
+    return status, response_body, response_headers
+
+
+def propfind(
+    settings: dict[str, Any], url: str, properties: list[tuple[str, str]], depth: str,
+) -> tuple[ET.Element, str]:
     prop = ET.Element(f"{{{DAV}}}prop")
     for namespace, name in properties:
         ET.SubElement(prop, f"{{{namespace}}}{name}")
     root = ET.Element(f"{{{DAV}}}propfind")
     root.append(prop)
-    _, body, _ = dav_request(
+    _, body, _, final_url = _dav_request(
         settings, "PROPFIND", url,
         body=ET.tostring(root, encoding="utf-8", xml_declaration=True),
         depth=depth, content_type="application/xml; charset=utf-8",
     )
     try:
-        return ET.fromstring(body)
+        return ET.fromstring(body), final_url
     except ET.ParseError as exc:
         raise ConnectionFailure("CalDAV server returned invalid XML") from exc
+
+
+def propfind_result(value: ET.Element | tuple[ET.Element, str], requested_url: str) -> tuple[ET.Element, str]:
+    return value if isinstance(value, tuple) else (value, requested_url)
 
 
 def find_text(element: ET.Element, namespace: str, name: str) -> str:
@@ -768,20 +801,43 @@ def find_property_href(element: ET.Element, namespace: str, name: str) -> str:
 
 
 def calendar_list(settings: dict[str, Any]) -> list[dict[str, str]]:
-    base_url = str(settings["base_url"])
-    first = propfind(settings, base_url, [(DAV, "current-user-principal"), (CALDAV, "calendar-home-set")], "0")
+    configured_url = str(settings["base_url"])
+    parsed = urlsplit(configured_url)
+    root_url = urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+    well_known_url = urlunsplit((parsed.scheme, parsed.netloc, "/.well-known/caldav", "", ""))
+    candidates = [well_known_url, root_url]
+    if parsed.path not in {"", "/"}:
+        candidates.insert(0, configured_url)
+    candidates = list(dict.fromkeys(candidates))
+    for index, candidate in enumerate(candidates):
+        try:
+            first, base_url = propfind_result(
+                propfind(
+                    settings, candidate,
+                    [(DAV, "current-user-principal"), (CALDAV, "calendar-home-set")], "0",
+                ),
+                candidate,
+            )
+            break
+        except NotFoundError:
+            if index == len(candidates) - 1:
+                raise
     home_href = find_property_href(first, CALDAV, "calendar-home-set")
     principal_href = find_property_href(first, DAV, "current-user-principal")
     if home_href:
         home_url = urljoin(base_url, home_href)
     elif principal_href:
         principal_url = urljoin(base_url, principal_href)
-        principal = propfind(settings, principal_url, [(CALDAV, "calendar-home-set")], "0")
+        principal, principal_url = propfind_result(
+            propfind(settings, principal_url, [(CALDAV, "calendar-home-set")], "0"), principal_url
+        )
         home_href = find_property_href(principal, CALDAV, "calendar-home-set")
         home_url = urljoin(principal_url, home_href) if home_href else base_url
     else:
         home_url = base_url
-    listing = propfind(settings, home_url, [(DAV, "displayname"), (DAV, "resourcetype")], "1")
+    listing, home_url = propfind_result(
+        propfind(settings, home_url, [(DAV, "displayname"), (DAV, "resourcetype")], "1"), home_url
+    )
     calendars: list[dict[str, str]] = []
     for response in listing.findall(f".//{{{DAV}}}response"):
         if response.find(f".//{{{CALDAV}}}calendar") is None:
@@ -899,7 +955,9 @@ def calendar_url(settings: dict[str, Any], override: str | None) -> str:
 def calendar_create(settings: dict[str, Any], event_data: dict[str, Any], override: str | None) -> dict[str, Any]:
     uid, body = event_to_ics(event_data)
     resource_url = calendar_url(settings, override) + quote(uid, safe="") + ".ics"
-    status, _, headers = dav_request(settings, "PUT", resource_url, body=body, content_type="text/calendar; charset=utf-8")
+    status, _, headers = dav_request(
+        settings, "PUT", resource_url, body=body, content_type="text/calendar; charset=utf-8"
+    )
     return {"uid": uid, "url": resource_url, "http_status": status, "etag": headers.get("ETag", "")}
 
 
