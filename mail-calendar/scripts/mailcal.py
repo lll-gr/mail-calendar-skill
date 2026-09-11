@@ -95,15 +95,18 @@ def storage_directory() -> Path:
 def _tighten_windows_acl(path: Path, *, directory: bool) -> bool:
     """Best-effort ACL hardening using Windows built-ins only."""
     try:
+        common = {"capture_output": True, "text": True,
+                  "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        if not directory:
+            inherited = subprocess.run(["icacls", str(path), "/inheritance:e"], **common)
+            return inherited.returncode == 0
         identity = subprocess.run(
             ["whoami"], capture_output=True, text=True, check=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout.strip()
         if not identity:
             return False
-        inherit = "(OI)(CI)F" if directory else "F"
-        common = {"capture_output": True, "text": True,
-                  "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        inherit = "(OI)(CI)F"
         granted = subprocess.run(
             ["icacls", str(path), "/grant:r", f"{identity}:{inherit}",
              f"*S-1-5-18:{inherit}", f"*S-1-5-32-544:{inherit}"],

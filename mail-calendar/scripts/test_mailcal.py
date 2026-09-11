@@ -185,14 +185,21 @@ class MailCalTests(unittest.TestCase):
             mailcal._make_private(path, directory=True, platform="posix")
         chmod.assert_called_once_with(path, 0o700)
 
-    def test_windows_acl_grants_before_disabling_inheritance(self):
+    def test_windows_directory_acl_grants_before_disabling_inheritance(self):
         completed = mock.Mock(returncode=0, stdout="desktop\\person\n")
         with mock.patch.object(mailcal.subprocess, "run", return_value=completed) as run:
-            self.assertTrue(mailcal._tighten_windows_acl(Path("credentials.json"), directory=False))
+            self.assertTrue(mailcal._tighten_windows_acl(Path(".mail-calendar-skill"), directory=True))
         self.assertEqual(run.call_count, 3)
         self.assertEqual(run.call_args_list[0].args[0], ["whoami"])
-        self.assertIn("desktop\\person:F", run.call_args_list[1].args[0])
+        self.assertIn("desktop\\person:(OI)(CI)F", run.call_args_list[1].args[0])
         self.assertEqual(run.call_args_list[2].args[0][-1], "/inheritance:r")
+
+    def test_windows_credentials_inherit_restricted_directory_acl(self):
+        completed = mock.Mock(returncode=0)
+        with mock.patch.object(mailcal.subprocess, "run", return_value=completed) as run:
+            self.assertTrue(mailcal._tighten_windows_acl(Path("credentials.json"), directory=False))
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0][-1], "/inheritance:e")
 
     def test_json_state_cursor_ack_and_retry(self):
         with tempfile.TemporaryDirectory() as directory:
