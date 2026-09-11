@@ -101,19 +101,19 @@ Skill 的目录结构和加载位置可参考 [OpenAI 官方 Skills 文档](http
 python -m pip install keyring
 ```
 
-写入邮箱和日历凭据：
+如果邮箱和日历使用同一个账号，并且服务商允许两种协议共用同一个密码或授权码，只需保存一次：
 
 ```bash
-python -m keyring set mail-calendar-imap person@example.com
-python -m keyring set mail-calendar-caldav person@example.com
+python -m keyring set mail-calendar person@example.com
 ```
 
-命令会交互式询问密码或授权码。Skill 的配置文件只保存引用：
+命令会交互式询问密码或授权码。邮箱和日历配置都引用同一个条目：
 
 ```text
-keyring:mail-calendar-imap:person@example.com
-keyring:mail-calendar-caldav:person@example.com
+keyring:mail-calendar:person@example.com
 ```
+
+只有在邮箱和日历使用不同账号、不同授权码或不同类型的 OAuth token 时，才需要分别保存两个 keyring 条目。
 
 不同系统使用对应的系统凭据存储：
 
@@ -139,15 +139,16 @@ python scripts/mailcal.py provider show mail qq
 python scripts/mailcal.py provider show calendar qq
 ```
 
-以 163 邮箱和 QQ 日历为例：
+以同一个 QQ 账号同时连接邮箱和日历为例：
 
 ```bash
 python scripts/mailcal.py config init \
-  --email person@163.com \
-  --mail-secret-ref keyring:mail-calendar-imap:person@163.com \
+  --email person@qq.com \
+  --mail-provider qq \
+  --mail-secret-ref keyring:mail-calendar:person@qq.com \
   --calendar-provider qq \
   --calendar-user person@qq.com \
-  --calendar-secret-ref keyring:mail-calendar-caldav:person@qq.com
+  --calendar-secret-ref keyring:mail-calendar:person@qq.com
 ```
 
 测试连接：

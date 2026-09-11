@@ -20,20 +20,20 @@
 - macOS：钥匙串访问（Keychain）
 - Linux：通常为 Secret Service 或 KWallet，取决于桌面环境
 
-安装并写入凭据：
+如果邮箱和日历使用同一个账号，并且服务商允许 IMAP 和 CalDAV 共用同一个密码或授权码，只需写入一次：
 
 ```text
 python -m pip install keyring
-python -m keyring set mail-calendar-imap person@example.com
-python -m keyring set mail-calendar-caldav person@example.com
+python -m keyring set mail-calendar person@example.com
 ```
 
-命令会交互式读取密码或授权码，不要把密码直接写在命令行中。对应的配置引用为：
+命令会交互式读取密码或授权码，不要把密码直接写在命令行中。邮箱和日历都使用同一个配置引用：
 
 ```text
-keyring:mail-calendar-imap:person@example.com
-keyring:mail-calendar-caldav:person@example.com
+keyring:mail-calendar:person@example.com
 ```
+
+只有在邮箱和日历使用不同账号、不同授权码，或者需要不同类型的 OAuth token 时，才分别创建两个 keyring 条目，并为 `mail.secret_ref` 和 `calendar.secret_ref` 配置不同引用。
 
 也可以使用 `env:VARIABLE_NAME` 从环境变量读取凭据，适合临时测试或已有安全注入机制的环境。不要把明文密码或授权码写入 Skill 目录、`config.json` 或 `state.json`。
 
@@ -43,11 +43,12 @@ keyring:mail-calendar-caldav:person@example.com
 
 ```text
 python scripts/mailcal.py config init \
-  --email person@163.com \
-  --mail-secret-ref keyring:mail-calendar-imap:person@163.com \
+  --email person@qq.com \
+  --mail-provider qq \
+  --mail-secret-ref keyring:mail-calendar:person@qq.com \
   --calendar-provider qq \
   --calendar-user person@qq.com \
-  --calendar-secret-ref keyring:mail-calendar-caldav:person@qq.com
+  --calendar-secret-ref keyring:mail-calendar:person@qq.com
 ```
 
 凭据引用支持：

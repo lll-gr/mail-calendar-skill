@@ -31,7 +31,7 @@ python scripts/mailcal.py provider show calendar qq
 ### `config init`
 
 ```text
-python scripts/mailcal.py config init --email person@163.com --mail-secret-ref keyring:mail-calendar-imap:person@163.com --calendar-provider qq --calendar-user person@qq.com --calendar-secret-ref keyring:mail-calendar-caldav:person@qq.com
+python scripts/mailcal.py config init --email person@qq.com --mail-provider qq --mail-secret-ref keyring:mail-calendar:person@qq.com --calendar-provider qq --calendar-user person@qq.com --calendar-secret-ref keyring:mail-calendar:person@qq.com
 ```
 
 | 参数 | 是否必需 | 说明 |
