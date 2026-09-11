@@ -81,6 +81,34 @@ python scripts/mailcal.py config init \
 
 Codex 和用户终端只要运行在同一个系统用户下，就会解析到同一组文件。
 
+## Codex 定时任务权限
+
+Skill 本身不能授予网络或沙箱外文件权限，自动化任务也没有可绑定到任务 ID 的独立网络权限开关。Codex 定时任务默认无人值守运行，因此应先为 `config test`、`mail` 和 `calendar` 命令配置精确规则，重启 Codex 后再创建或启用任务；不要允许任意 `python` 命令。每条 CLI 调用都应是独立的简单命令，避免在同一条 shell 命令中拼接其他操作。
+
+把下面示例中的 `<USER>` 替换为当前用户名，并保存到 `~/.codex/rules/mail-calendar.rules`：
+
+```python
+prefix_rule(
+    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "config", "test"],
+    decision = "allow",
+    justification = "Allow only the mail-calendar connectivity test outside the sandbox.",
+)
+
+prefix_rule(
+    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "mail", ["folders", "search", "pending", "get", "ack", "retry", "state"]],
+    decision = "allow",
+    justification = "Allow only mail-calendar IMAP and mail state operations outside the sandbox.",
+)
+
+prefix_rule(
+    pattern = ["python", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "calendar", ["list", "create", "delete"]],
+    decision = "allow",
+    justification = "Allow only mail-calendar CalDAV operations outside the sandbox.",
+)
+```
+
+规则刻意不放行 `config init`、其他脚本或普通 Python 命令。新增或修改规则后重启 Codex，并用 `codex execpolicy check --pretty --rules <规则文件> -- <命令>` 检查实际决策。
+
 ## 服务商预设
 
 邮箱预设包括 `qq`、`netease163`、`netease126`、`netease-yeah`、`aliyun`、`gmail` 和 `outlook`。`auto` 会根据邮箱域名选择预设。其他 IMAP 邮箱可使用 `generic`，并提供 `--mail-host`、`--mail-port` 和 `--mail-auth`。

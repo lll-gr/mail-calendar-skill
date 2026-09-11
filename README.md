@@ -178,6 +178,10 @@ python scripts/mailcal.py calendar list
 
 Skill 也支持根据描述自动触发；是否调用取决于用户请求与 `SKILL.md` 中的描述是否匹配。
 
+### 定时任务权限
+
+Codex 定时任务访问 IMAP/CalDAV 时需要网络权限，维护 `~/.mail-calendar-skill/state.json` 时还需要写入项目目录之外的用户 home。自动化任务本身没有单独的网络权限开关，权限也不能绑定到某个任务 ID；应先为已安装脚本配置只覆盖 `config test`、`mail` 和 `calendar` 子命令的精确规则，重启 Codex 后再创建或启用任务。不要放行任意 Python 命令。规则示例和验证命令见 [`configuration.md`](mail-calendar/references/configuration.md#codex-定时任务权限)。
+
 ## 直接使用 CLI
 
 获取新增且尚未处理的邮件头：
