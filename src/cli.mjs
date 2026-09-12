@@ -1,106 +1,41 @@
 #!/usr/bin/env node
-import { Command, Option, InvalidArgumentError } from 'commander';
-import { readFileSync, realpathSync } from 'node:fs';
+import { Command } from 'commander';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import manifest from '../package.json' with { type: 'json' };
-import { ConfigStore, configInit } from './config.mjs';
-import { MAIL_PROVIDERS, CALENDAR_PROVIDERS } from './providers.mjs';
-import { StateStore, mailboxKey } from './state.mjs';
-import { imapFolders, imapSearch, imapPending, imapGet, withImap } from './imap.mjs';
-import { calendarList, calendarCreate, calendarDelete } from './caldav.mjs';
-import { MailCalError, InputError, NotFoundError, isObject, positiveInteger as parsePositiveInteger } from './errors.mjs';
+import { commands, groups, emit } from './commands.mjs';
+import { createContext } from './context.mjs';
+import { MailCalError, InputError } from './errors.mjs';
 
 export const VERSION = manifest.version;
-const emit = data => process.stdout.write(JSON.stringify({ ok: true, data }, null, 2) + '\n');
 
-export function readInput(path, label, array = false) {
-  let value;
-  try { value = JSON.parse(readFileSync(path === '-' ? 0 : path, 'utf8')); }
-  catch { throw new InputError(`Cannot read ${label} JSON`); }
-  if (array ? !Array.isArray(value) || !value.every(isObject) : !isObject(value)) {
-    throw new InputError(array ? `${label} JSON must be an array of objects` : `${label} JSON must be an object`);
-  }
-  return value;
-}
-
-const positiveInteger = value => {
-  const parsed = parsePositiveInteger(value);
-  if (parsed === undefined) throw new InvalidArgumentError('Must be a positive integer');
-  return parsed;
-};
-const repeat = (value, previous) => [...previous, value];
-const folderOption = command => command.option('--folder <name>', 'IMAP folder', 'INBOX');
-const limitOptions = command => folderOption(command).option('--since <date>', 'YYYY-MM-DD, Nd, or Nw', '30d').option('--limit <number>', 'Maximum headers returned', positiveInteger, 50);
-const run = handler => async (...values) => emit(await handler(...values));
-
-export function buildParser(storeFactory = () => new ConfigStore()) {
-  const program = new Command().name('mailcal').description('Protocol-only CLI for one IMAP mailbox and one CalDAV calendar.').version(VERSION);
+export function buildParser(ctx = createContext()) {
+  const program = new Command()
+    .name('mailcal')
+    .description('Protocol-only CLI for one IMAP mailbox and one CalDAV calendar.')
+    .version(VERSION);
+  // Both calls must precede any .command(): a subcommand copies the exit callback and
+  // output configuration by reference at construction time. A subcommand built first
+  // would call process.exit() on a parse error and bypass the JSON error envelope.
   program.exitOverride().configureOutput({ outputError: () => {} });
-  const provider = program.command('provider').description('Inspect provider presets');
-  provider.command('list').action(run(() => ({ mail: Object.keys(MAIL_PROVIDERS).sort(), calendar: Object.keys(CALENDAR_PROVIDERS).sort() })));
-  provider.command('show').argument('<kind>', 'mail or calendar').argument('<name>').action(run((kind, name) => {
-    if (!['mail', 'calendar'].includes(kind)) throw new InputError('Provider kind must be mail or calendar');
-    const source = kind === 'mail' ? MAIL_PROVIDERS : CALENDAR_PROVIDERS;
-    if (!Object.hasOwn(source, name)) throw new NotFoundError(`Unknown ${kind} provider: ${name}`);
-    return { kind, name, ...source[name] };
-  }));
-  const config = program.command('config').description('Configure the mailbox and calendar');
-  config.command('init').requiredOption('--email <address>')
-    .option('--mail-provider <name>', 'Mail provider', 'auto').option('--mail-host <host>')
-    .option('--mail-port <port>', 'IMAP port', positiveInteger)
-    .addOption(new Option('--mail-security <mode>').choices(['ssl', 'starttls', 'plain']))
-    .addOption(new Option('--mail-auth <mode>').choices(['password', 'xoauth2']))
-    .addOption(new Option('--calendar-provider <name>').choices(Object.keys(CALENDAR_PROVIDERS)).makeOptionMandatory())
-    .option('--calendar-url <url>').option('--calendar-collection-url <url>').option('--calendar-user <name>')
-    .addOption(new Option('--calendar-auth <mode>').choices(['basic', 'bearer']))
-    .option('--reuse-mail-secret', 'Use mail credentials for the calendar too')
-    .option('--timezone <name>', 'Default timezone', 'Asia/Shanghai').option('--force', 'Replace existing configuration')
-    .action(run(args => configInit(args, storeFactory())));
-  config.command('show').action(run(() => storeFactory().show()));
-  config.command('test').action(run(async () => {
-    const store = storeFactory();
-    const settings = store.mail();
-    await withImap(settings, async () => {});
-    return { imap: { ok: true, server: `${settings.host}:${settings.port}` }, caldav: { ok: true, calendars: await calendarList(store.calendar()) } };
-  }));
-  const mail = program.command('mail').description('Read mail and manage processing state');
-  mail.command('folders').action(run(() => imapFolders(storeFactory().mail())));
-  limitOptions(mail.command('search')).option('--subject <text>').option('--from <text>').option('--unseen')
-    .action(run(args => imapSearch(storeFactory().mail(), args)));
-  limitOptions(mail.command('pending')).option('--scan-limit <number>', 'Maximum new headers fetched', positiveInteger, 200)
-    .action(run(args => { const store = storeFactory(); return imapPending(store.mail(), args, store.statePath); }));
-  folderOption(mail.command('get')).requiredOption('--uid <uid>')
-    .action(run(args => imapGet(storeFactory().mail(), args.folder, args.uid)));
-  folderOption(mail.command('ack')).option('--uid <uid>', 'Repeat for multiple messages', repeat, [])
-    .addOption(new Option('--input <path>', 'JSON array path, or - for stdin').conflicts('uid'))
-    .option('--outcome <value>', 'Processing outcome', 'processed').option('--event-uid <uid>')
-    .action(run(args => {
-      const store = storeFactory();
-      const state = new StateStore(store.statePath);
-      const key = mailboxKey(store.mail(false));
-      const validity = state.currentUidvalidity(key, args.folder);
-      if (!args.input && !args.uid.length) throw new InputError('mail ack requires --uid or --input');
-      const items = args.input ? readInput(args.input, 'Acknowledgement', true) : args.uid.map(uid => ({ uid, outcome: args.outcome, event_uid: args.eventUid ?? '' }));
-      return { folder: args.folder, uidvalidity: validity, acknowledged: state.acknowledge(key, args.folder, validity, items) };
-    }));
-  folderOption(mail.command('retry')).requiredOption('--uid <uid>', 'Repeat for multiple messages', repeat, [])
-    .action(run(args => {
-      const store = storeFactory();
-      const state = new StateStore(store.statePath);
-      const key = mailboxKey(store.mail(false));
-      const validity = state.currentUidvalidity(key, args.folder);
-      return { folder: args.folder, uidvalidity: validity, retried: state.retry(key, args.folder, validity, args.uid) };
-    }));
-  folderOption(mail.command('state')).action(run(args => {
-    const store = storeFactory();
-    return new StateStore(store.statePath).summary(mailboxKey(store.mail(false)), args.folder);
-  }));
-  const calendar = program.command('calendar').description('Manage CalDAV calendar events');
-  calendar.command('list').action(run(() => calendarList(storeFactory().calendar())));
-  calendar.command('create').requiredOption('--input <path>', 'Event JSON path, or - for stdin').option('--calendar-url <url>')
-    .action(run(args => calendarCreate(storeFactory().calendar(), readInput(args.input, 'Event'), args.calendarUrl)));
-  calendar.command('delete').option('--uid <uid>').option('--url <url>').option('--calendar-url <url>')
-    .action(run(args => calendarDelete(storeFactory().calendar(), args.uid, args.url, args.calendarUrl)));
+  // Groups come from a table, and commander rejects a duplicate name, so build each
+  // one once and hang the leaf commands off the cached node.
+  const nodes = new Map();
+  for (const group of groups) nodes.set(group.name, program.command(group.name).description(group.description));
+  for (const command of commands) {
+    const separator = command.name.indexOf(' ');
+    const node = nodes
+      .get(command.name.slice(0, separator))
+      .command(command.name.slice(separator + 1))
+      .description(command.description);
+    for (const argument of command.arguments ?? []) node.addArgument(argument);
+    for (const option of command.options ?? []) node.addOption(option);
+    node.action(async (...values) => {
+      // An action receives the declared positional arguments, then the options object.
+      const declared = command.arguments?.length ?? 0;
+      emit(await command.run(ctx, values[declared], values.slice(0, declared)));
+    });
+  }
   return program;
 }
 
