@@ -113,9 +113,9 @@ prefix_rule(
 
 ## 服务商预设
 
-邮箱预设包括 `qq`、`netease163`、`netease126`、`netease-yeah`、`aliyun`、`gmail` 和 `outlook`。`auto` 会根据邮箱域名选择预设。其他 IMAP 邮箱可使用 `generic`，并提供 `--mail-host`、`--mail-port` 和 `--mail-auth`。
+可用预设见 `provider list`，单个预设的连接参数见 `provider show`。`auto` 会根据邮箱域名选择预设；其他 IMAP 邮箱使用 `generic`，需要提供 `--mail-host`、`--mail-port` 和 `--mail-auth`。
 
-日历预设包括 `qq`、`google` 和 `generic`。Google CalDAV 使用 bearer token，集合地址中包含日历 ID。CLI 不负责获取或刷新 OAuth token，需把当前 token 写入 `credentials.json`。
+Google CalDAV 使用 bearer token，集合地址中包含日历 ID。CLI 不负责获取或刷新 OAuth token，需把当前 token 写入 `credentials.json`。
 
 `calendar.base_url` 需要指向提供标准 CalDAV 发现接口的服务端。如果 `calendar list` 或 `config test` 无法发现日历，把已知的日历集合地址直接写入 `calendar.collection_url`；`calendar create` 和 `calendar delete` 不经过发现流程，此时仍然可用。
 
