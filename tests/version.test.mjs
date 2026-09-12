@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, copyFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, copyFileSync, symlinkSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
@@ -68,7 +68,9 @@ test('release preparation CLI finishes its build and rejects a mismatched tag', 
   // The builder imports the shared version helpers, just like the real builder.
   writeFileSync(join(root, 'tools/build.mjs'), "import { readVersionState, checkVersionState } from './version.mjs'; console.log('Built v' + checkVersionState(await readVersionState()));\n");
   const execute = promisify(execFile);
-  const result = await execute(process.execPath, [join(root, 'tools/version.mjs'), '0.4.0'], { timeout: 5000 });
+  symlinkSync(join(root, 'tools'), join(root, 'tool-alias'), process.platform === 'win32' ? 'junction' : 'dir');
+  const executable = join(root, 'tool-alias/version.mjs');
+  const result = await execute(process.execPath, [executable, '0.4.0'], { timeout: 5000 });
   assert.ok(result.stdout.includes('Built v0.4.0') && result.stdout.includes('Prepared v0.4.0'));
-  await assert.rejects(execute(process.execPath, [join(root, 'tools/version.mjs'), '--check', '--tag', 'v0.3.0'], { timeout: 5000 }), error => error.code === 1 && error.stderr.includes('Tag v0.3.0'));
+  await assert.rejects(execute(process.execPath, [executable, '--check', '--tag', 'v0.3.0'], { timeout: 5000 }), error => error.code === 1 && error.stderr.includes('Tag v0.3.0'));
 });

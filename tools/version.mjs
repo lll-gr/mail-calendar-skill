@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const number = '(?:0|[1-9]\\d*)';
@@ -87,7 +88,7 @@ export async function prepareVersion(version, directory = root) {
   await writeFile(resolve(directory, 'skills/mail-calendar/SKILL.md'), updatedSkill);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const args = process.argv.slice(2);
     if (args[0] === '--check' && (args.length === 1 || (args.length === 3 && args[1] === '--tag'))) {
