@@ -152,7 +152,7 @@ node scripts/mailcal.mjs mail retry --uid 124 --uid 125
 node scripts/mailcal.mjs mail state
 ```
 
-- `mail retry` 把一个或多个已确认 UID 恢复为待处理；`--uid` 可以重复，`--folder` 默认 `INBOX`。
+- `mail retry` 把一个或多个已确认 UID 恢复为待处理；`--uid` 可以重复且至少需要一个，`--folder` 默认 `INBOX`。
 - `mail state` 显示指定文件夹的 `UIDVALIDITY`、游标和待处理/已处理数量；`--folder` 默认 `INBOX`。
 
 ## 管理日历

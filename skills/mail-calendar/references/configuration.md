@@ -117,7 +117,7 @@ prefix_rule(
 
 日历预设包括 `qq`、`google` 和 `generic`。Google CalDAV 使用 bearer token，集合地址中包含日历 ID。CLI 不负责获取或刷新 OAuth token，需把当前 token 写入 `credentials.json`。
 
-当 CalDAV 基础地址只包含主机根地址时，CLI 会按 RFC 6764 尝试 `/.well-known/caldav`，跟随同源 HTTP 重定向到实际服务路径，并在标准入口不存在时回退到根地址。配置中已经包含明确服务路径时，优先使用该路径。
+`calendar.base_url` 需要指向提供标准 CalDAV 发现接口的服务端。如果 `calendar list` 或 `config test` 无法发现日历，把已知的日历集合地址直接写入 `calendar.collection_url`；`calendar create` 和 `calendar delete` 不经过发现流程，此时仍然可用。
 
 ## 选择日历
 
