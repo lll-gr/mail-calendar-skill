@@ -1,7 +1,7 @@
 import { createDAVClient, getBasicAuthHeaders, getBearerAuthHeaders, updateCalendarObject, deleteCalendarObject } from 'tsdav';
-import manifest from '../package.json' with { type: 'json' };
 import { eventToIcs } from './ical.mjs';
 import { ConfigError, ConnectionFailure, NotFoundError, InputError, MailCalError } from './errors.mjs';
+import { VERSION } from './version.mjs';
 
 export function authHeaders(settings) {
   if (settings.auth === 'basic') return getBasicAuthHeaders({ username: settings.username, password: settings.secret });
@@ -20,7 +20,7 @@ export function calendarTransport(settings, fetchImpl = globalThis.fetch) {
         if (url.origin !== origin || url.username || url.password) throw new ConnectionFailure('CalDAV URL uses a different origin; configure its base URL first');
         const headers = new Headers(init.headers);
         for (const [key, value] of Object.entries(authHeaders(settings))) headers.set(key, value);
-        headers.set('User-Agent', `mailcal/${manifest.version}`);
+        headers.set('User-Agent', `mailcal/${VERSION}`);
         const response = await fetchImpl(url.href, { ...init, headers, signal, redirect: 'manual' });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.get('location');

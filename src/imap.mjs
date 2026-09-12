@@ -91,7 +91,7 @@ async function openMailbox(client, folder) {
 }
 
 async function fetchHeader(client, uid) {
-  const fetched = await client.fetchOne(uid, { headers: ['MESSAGE-ID', 'SUBJECT', 'FROM', 'TO', 'DATE'], size: true }, { uid: true });
+  const fetched = await client.fetchOne(uid, { headers: ['MESSAGE-ID', 'SUBJECT', 'FROM', 'TO', 'DATE'] }, { uid: true });
   if (!fetched || !fetched.headers) return undefined;
   const { text, attachments, ...header } = await parseMessage(fetched.headers, uid);
   return header;

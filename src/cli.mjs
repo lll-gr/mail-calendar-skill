@@ -2,12 +2,22 @@
 import { Command } from 'commander';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import manifest from '../package.json' with { type: 'json' };
 import { commands, groups, emit } from './commands.mjs';
 import { createContext } from './context.mjs';
 import { MailCalError, InputError } from './errors.mjs';
+import { VERSION } from './version.mjs';
 
-export const VERSION = manifest.version;
+// Mirrors `engines.node` in package.json (`^22.13.0 || >=24.0.0`, which excludes
+// Node 23). A test asserts the two agree, so this is the only place to change it.
+export const MINIMUM_NODE = { major: 22, minor: 13 };
+export const NEXT_NODE_MAJOR = 24;
+
+export const supportsNode = version => {
+  const [major, minor] = String(version).split('.').map(Number);
+  return (major === MINIMUM_NODE.major && minor >= MINIMUM_NODE.minor) || major >= NEXT_NODE_MAJOR;
+};
+
+export { VERSION };
 
 export function buildParser(ctx = createContext()) {
   const program = new Command()
@@ -41,8 +51,9 @@ export function buildParser(ctx = createContext()) {
 
 export async function main(argv = process.argv.slice(2)) {
   try {
-    const [major, minor] = process.versions.node.split('.').map(Number);
-    if (!(major === 22 && minor >= 13 || major >= 24)) throw new InputError('Node.js 22.13+ or 24+ is required');
+    if (!supportsNode(process.versions.node)) {
+      throw new InputError(`Node.js ${MINIMUM_NODE.major}.${MINIMUM_NODE.minor}+ or ${NEXT_NODE_MAJOR}+ is required`);
+    }
     await buildParser().parseAsync(argv, { from: 'user' });
     return 0;
   } catch (error) {
