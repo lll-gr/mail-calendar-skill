@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { MailParser } from 'mailparser';
 import { htmlToText } from 'html-to-text';
+import { DateTime } from 'luxon';
 import { ConnectionFailure, NotFoundError, InputError, MailCalError, normalizeUid } from './errors.mjs';
 import { parseDate } from './ical.mjs';
 import { StateStore, mailboxKey } from './state.mjs';
@@ -61,7 +62,6 @@ export async function parseMessage(raw, uid) {
   return new Promise((resolve, reject) => {
     const parser = new MailParser({ skipTextToHtml: true, skipTextLinks: true, skipImageLinks: true });
     const result = { uid: String(uid), message_id: '', subject: '', from: '', to: '', date: '', text: '', attachments: [] };
-    let parsedDate;
     parser.on('error', () => reject(new ConnectionFailure('Cannot parse message data')));
     parser.on('headers', headers => {
       result.message_id = headers.get('message-id') ?? '';
@@ -69,18 +69,14 @@ export async function parseMessage(raw, uid) {
       result.from = headers.get('from')?.text ?? '';
       result.to = headers.get('to')?.text ?? '';
       const date = headers.get('date');
-      parsedDate = date;
       result.date = date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : '';
     });
     parser.on('headerLines', lines => {
-      const rawDate = lines.find(line => line.key === 'date')?.line.replace(/^Date:\s*/i, '').replace(/\r?\n\s+/g, ' ') ?? '';
-      const offset = rawDate.match(/([+-])(\d{2})(\d{2})(?=\s*(?:\([^)]*\))?\s*$)/);
-      if (!(parsedDate instanceof Date) || !Number.isFinite(parsedDate.getTime())) { result.date = rawDate; return; }
-      if (offset) {
-        const minutes = (Number(offset[2]) * 60 + Number(offset[3])) * (offset[1] === '-' ? -1 : 1);
-        // Retain the sender's date and offset for interpreting "tomorrow" in mail.
-        result.date = new Date(parsedDate.getTime() + minutes * 60000).toISOString().slice(0, 19) + `${offset[1]}${offset[2]}:${offset[3]}`;
-      }
+      const line = lines.find(line => line.key === 'date')?.line ?? '';
+      const rawDate = line.slice(line.indexOf(':') + 1).trim();
+      // MailParser returns a JS Date without the original offset; Luxon retains it and handles folding/comments.
+      const date = DateTime.fromRFC2822(rawDate, { setZone: true });
+      result.date = date.isValid ? date.toISO({ suppressMilliseconds: true }) : rawDate;
     });
     parser.on('data', item => {
       if (item.type === 'text') result.text = (item.text || (item.html ? htmlToText(item.html) : '')).trim();

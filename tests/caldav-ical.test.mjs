@@ -26,7 +26,7 @@ test('all-day dates keep their date and default to the next day', () => {
 });
 
 test('rejects invalid dates, floating times, mixed types, reversed ends and injection in UID', () => {
-  for (const start of ['2026-02-30', '2026-09-15T14:00:00', '2026-09-15T99:00:00Z']) assert.throws(() => eventToIcs({ ...event(), start }), InputError);
+  for (const start of ['2026-02-30', '2026-09-15T14:00:00', '2026-09-15T99:00:00Z', '2026-09-15T14:60:00Z', '2026-09-15T14:00:00+99:99', '2026-09-15T14:00:00+01:99', '14:00:00Z']) assert.throws(() => eventToIcs({ ...event(), start }), InputError);
   assert.throws(() => eventToIcs({ ...event(), end: '2026-09-20' }), InputError);
   assert.throws(() => eventToIcs({ ...event(), end: '2026-09-15T13:00:00+08:00' }), InputError);
   assert.throws(() => eventToIcs({ ...event(), uid: 'a\r\nBEGIN:VEVENT' }), InputError);
@@ -37,27 +37,33 @@ test('rejects invalid dates, floating times, mixed types, reversed ends and inje
 test('alarm durations and Chinese text are safely encoded and folded', () => {
   assert.equal(alarmSeconds('-P1DT2H30M'), -95400);
   assert.equal(alarmSeconds('PT1H'), 3600);
-  assert.throws(() => alarmSeconds('P'), InputError);
+  assert.equal(alarmSeconds('-P2W'), -1209600);
+  for (const value of ['P', 'PT', 'P1M', 'P1Y', 'PT1.5H', 'P1DT-2H', '-P1DT-2H', 'PT999999999999999999S']) assert.throws(() => alarmSeconds(value), InputError);
   const result = eventToIcs({ ...event(), summary: '会议'.repeat(60), description: 'line 1\nline 2; test, value' });
   assert.ok(result.body.includes('DESCRIPTION:line 1\\nline 2\\; test\\, value'));
   for (const line of result.body.split('\r\n')) assert.ok(Buffer.byteLength(line) <= 75);
 });
 
-for (const options of [{}, { redirect: true }, { missingWellKnown: true }, { directHome: true }]) {
+for (const options of [{}, { redirect: true }, { missingWellKnown: true }]) {
   test(`tsdav discovers calendars over real HTTP: ${JSON.stringify(options)}`, async t => {
     const server = await davServer(t, options);
     const result = await calendarList(calendarSettings(server.base));
     assert.deepEqual(result, [{ name: 'Work & Meetings', url: new URL('calendars/user/default/', server.base).href }]);
     assert.equal(server.requests[0].url, '/.well-known/caldav');
-    assert.ok(server.requests.every(request => request.headers.authorization === authHeaders(calendarSettings(server.base)).Authorization));
+    assert.ok(server.requests.every(request => request.headers.authorization === new Headers(authHeaders(calendarSettings(server.base))).get('authorization')));
     if (options.redirect) assert.equal(server.requests[1].method, 'PROPFIND');
   });
 }
 
-test('explicit service paths take precedence over well-known discovery', async t => {
-  const server = await davServer(t);
+test('tsdav falls back to the configured service path when well-known is missing', async t => {
+  const server = await davServer(t, { missingWellKnown: true });
   await calendarList({ ...calendarSettings(server.base), base_url: new URL('/dav/', server.base).href });
-  assert.equal(server.requests[0].url, '/dav/');
+  assert.ok(server.requests.some(request => request.url === '/dav/' && request.body.includes('current-user-principal')));
+});
+
+test('a nonstandard service without a principal returns a clear discovery error', async t => {
+  const server = await davServer(t, { directHome: true });
+  await assert.rejects(calendarList(calendarSettings(server.base)), ConnectionFailure);
 });
 
 test('repeated calendar create replaces the same resource, then delete removes it', async t => {

@@ -1,33 +1,35 @@
 import ical from 'ical-generator';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
+import { DateTime, Duration } from 'luxon';
 import { InputError, isObject } from './errors.mjs';
 
 export function parseDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new InputError(`Invalid ISO 8601 date: ${value}`);
-  const date = new Date(`${value}T00:00:00Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new InputError(`Invalid ISO 8601 date: ${value}`);
-  return date;
+  const date = DateTime.fromFormat(value, 'yyyy-MM-dd', { zone: 'utc' });
+  if (!date.isValid || date.toISODate() !== value) throw new InputError(`Invalid ISO 8601 date: ${value}`);
+  return date.toJSDate();
 }
 
 export function eventTime(value) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return { date: parseDate(value), allDay: true };
-  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) throw new InputError(`Datetime must include a UTC offset: ${value}`);
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
-    throw new InputError(`Invalid ISO 8601 date/time: ${value}`);
-  }
-  parseDate(value.slice(0, 10));
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) throw new InputError(`Invalid ISO 8601 date/time: ${value}`);
-  return { date, allDay: false };
+  const iso = value.toUpperCase();
+  const dateOnly = parseDate(iso.split('T')[0]);
+  if (!iso.includes('T')) return { date: dateOnly, allDay: true };
+  // Luxon permits floating times and oversized offsets; our input requires a valid explicit offset.
+  if (!/(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(iso)) throw new InputError(`Datetime must include a valid UTC offset: ${value}`);
+  const date = DateTime.fromISO(iso, { setZone: true });
+  if (!date.isValid) throw new InputError(`Invalid ISO 8601 date/time: ${value}`);
+  return { date: date.toJSDate(), allDay: false };
 }
 
 export function alarmSeconds(value) {
-  const valid = /^-?P(?:\d+W|\d+D(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?|T(?=\d)(?:\d+H)?(?:\d+M)?(?:\d+S)?)$/;
-  if (!valid.test(value)) throw new InputError(`Unsupported alarm trigger: ${value}`);
-  const amount = unit => Number(value.match(new RegExp(`(\\d+)${unit}`))?.[1] ?? 0);
-  const seconds = amount('W') * 604800 + amount('D') * 86400 + amount('H') * 3600 + amount('M') * 60 + amount('S');
-  if (!Number.isSafeInteger(seconds)) throw new InputError(`Unsupported alarm trigger: ${value}`);
-  return value.startsWith('-') ? -seconds : seconds;
+  const duration = Duration.fromISO(value);
+  const units = Object.entries(duration.toObject());
+  const sign = value.startsWith('-') ? -1 : 1;
+  const seconds = duration.as('seconds');
+  // Relative iCalendar reminders use whole weeks/days/time, not calendar months or years.
+  if (!duration.isValid || !units.length || units.some(([unit, amount]) => !['weeks', 'days', 'hours', 'minutes', 'seconds'].includes(unit) || !Number.isInteger(amount) || amount * sign < 0) || !Number.isSafeInteger(seconds)) {
+    throw new InputError(`Unsupported alarm trigger: ${value}`);
+  }
+  return seconds;
 }
 
 export function eventToIcs(data) {

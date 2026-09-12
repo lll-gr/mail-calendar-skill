@@ -43,6 +43,8 @@
 }
 ```
 
+`calendar.base_url` 填写 CalDAV 服务入口。
+
 `credentials.json` 示例：
 
 ```json

@@ -39,6 +39,11 @@ test('MailParser decodes Chinese, strips scripts, and returns attachment metadat
   assert.equal((await parseMessage(header('10'), '10')).subject, 'Meeting 10');
   const midnight = await parseMessage(Buffer.from('Date: Fri, 11 Sep 2026 00:30:00 +0800\r\n\r\nTomorrow'), '43');
   assert.equal(midnight.date, '2026-09-11T00:30:00+08:00');
+  for (const value of ['Fri, 11 Sep 2026 00:30:00 +0800 (CST)', 'Fri, 11 Sep 2026\r\n 00:30:00 +0800']) {
+    assert.equal((await parseMessage(Buffer.from(`Date: ${value}\r\n\r\nTomorrow`), '44')).date, '2026-09-11T00:30:00+08:00');
+  }
+  assert.equal((await parseMessage(Buffer.from('Date: Fri, 11 Sep 2026 23:30:00 EST\r\n\r\nTomorrow'), '45')).date, '2026-09-11T23:30:00-05:00');
+  assert.equal((await parseMessage(Buffer.from('Date: invalid sender date\r\n\r\nTomorrow'), '46')).date, 'invalid sender date');
 });
 
 class FakeImap extends EventEmitter {

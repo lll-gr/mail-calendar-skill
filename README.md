@@ -17,6 +17,7 @@
 - 非敏感设置与明文凭据分文件保存，所有协议代码通过同一个访问层取得运行时配置。
 - 安装后只需要 Node.js，运行依赖已打包进 `.mjs`，无需安装 Python 或执行 `npm install`。
 - IMAP、邮件解析、CalDAV 和日程生成分别使用 ImapFlow、MailParser、tsdav 和 ical-generator。
+- ISO 日期、提醒时长和邮件原始时区由 Luxon 解析。
 
 ## 工作方式
 

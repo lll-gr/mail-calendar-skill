@@ -1,10 +1,11 @@
-import { createAccount, propfind, fetchCalendars, updateCalendarObject, deleteCalendarObject } from 'tsdav';
+import { createDAVClient, getBasicAuthHeaders, getBearerAuthHeaders, updateCalendarObject, deleteCalendarObject } from 'tsdav';
+import manifest from '../package.json' with { type: 'json' };
 import { eventToIcs } from './ical.mjs';
-import { ConfigError, ConnectionFailure, NotFoundError, InputError, MailCalError, isObject } from './errors.mjs';
+import { ConfigError, ConnectionFailure, NotFoundError, InputError, MailCalError } from './errors.mjs';
 
 export function authHeaders(settings) {
-  if (settings.auth === 'basic') return { Authorization: `Basic ${Buffer.from(`${settings.username}:${settings.secret}`).toString('base64')}` };
-  if (settings.auth === 'bearer') return { Authorization: `Bearer ${settings.secret}` };
+  if (settings.auth === 'basic') return getBasicAuthHeaders({ username: settings.username, password: settings.secret });
+  if (settings.auth === 'bearer') return getBearerAuthHeaders({ accessToken: settings.secret });
   throw new ConfigError(`Unsupported CalDAV auth mode: ${settings.auth}`);
 }
 
@@ -19,13 +20,15 @@ export function calendarTransport(settings, fetchImpl = globalThis.fetch) {
         if (url.origin !== origin || url.username || url.password) throw new ConnectionFailure('CalDAV URL uses a different origin; configure its base URL first');
         const headers = new Headers(init.headers);
         for (const [key, value] of Object.entries(authHeaders(settings))) headers.set(key, value);
-        headers.set('User-Agent', 'mailcal/0.3.0');
+        headers.set('User-Agent', `mailcal/${manifest.version}`);
         const response = await fetchImpl(url.href, { ...init, headers, signal, redirect: 'manual' });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.get('location');
           if (!location) throw new ConnectionFailure('CalDAV redirect has no Location header');
           const target = new URL(location, url);
           if (target.origin !== origin || target.username || target.password) throw new ConnectionFailure('CalDAV redirected to a different origin; configure its base URL first');
+          // tsdav's service discovery consumes redirects itself.
+          if (init.redirect === 'manual') return response;
           await response.body?.cancel();
           url = target;
           continue;
@@ -43,43 +46,15 @@ export function calendarTransport(settings, fetchImpl = globalThis.fetch) {
 }
 
 export async function calendarList(settings, fetchImpl = globalThis.fetch) {
-  const transport = calendarTransport(settings, fetchImpl);
-  let finalUrl;
-  const trackingFetch = async (url, options) => {
-    const response = await transport(url, options);
-    finalUrl = response.url || String(url);
-    return response;
-  };
-  const base = new URL(settings.base_url);
-  const candidates = [...new Set([
-    ...(base.pathname !== '/' ? [base.href] : []),
-    new URL('/.well-known/caldav', base).href, new URL('/', base).href,
-  ])];
   try {
-    let first;
-    for (const [index, candidate] of candidates.entries()) {
-      try {
-        const responses = await propfind({ url: candidate, props: { 'd:current-user-principal': {}, 'c:calendar-home-set': {} }, depth: '0', fetch: trackingFetch });
-        first = responses.find(response => response.ok && isObject(response.props));
-        if (!first) throw new ConnectionFailure('CalDAV discovery returned invalid XML or properties');
-        break;
-      } catch (error) {
-        if (!(error instanceof NotFoundError) || index === candidates.length - 1) throw error;
-      }
-    }
-    const principal = first.props.currentUserPrincipal?.href;
-    const home = first.props.calendarHomeSet?.href;
-    // tsdav handles DAV XML and principal/home discovery; the adapter preserves
-    // support for servers exposing a home set directly at the service endpoint.
-    const account = await createAccount({
-      account: {
-        accountType: 'caldav', serverUrl: base.href, rootUrl: finalUrl,
-        principalUrl: principal ? new URL(principal, finalUrl).href : finalUrl,
-        ...(home ? { homeUrl: new URL(home, finalUrl).href } : !principal ? { homeUrl: finalUrl } : {}),
-      },
-      fetch: transport,
+    const client = await createDAVClient({
+      serverUrl: settings.base_url,
+      defaultAccountType: 'caldav',
+      authMethod: settings.auth === 'basic' ? 'Basic' : 'Bearer',
+      credentials: settings.auth === 'basic' ? { username: settings.username, password: settings.secret } : { accessToken: settings.secret },
+      fetch: calendarTransport(settings, fetchImpl),
     });
-    const calendars = await fetchCalendars({ account, fetch: transport });
+    const calendars = await client.fetchCalendars();
     return calendars.map(calendar => ({ name: typeof calendar.displayName === 'string' && calendar.displayName ? calendar.displayName : new URL(calendar.url).pathname.replace(/\/$/, '').split('/').at(-1), url: calendar.url }));
   } catch (error) {
     if (error instanceof MailCalError) throw error;

@@ -21,6 +21,7 @@
     "html-to-text": "10.0.1",
     "ical-generator": "11.1.1",
     "imapflow": "2.0.2",
+    "luxon": "3.7.2",
     "mailparser": "3.9.26",
     "tsdav": "2.3.3",
     "uuid": "14.0.2"
