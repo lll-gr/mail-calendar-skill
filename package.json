@@ -1,6 +1,6 @@
 {
   "name": "mail-calendar-skill",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Build and test the self-contained Node.js mail-calendar skill",

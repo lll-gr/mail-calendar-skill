@@ -2,7 +2,7 @@
 name: mail-calendar
 description: 通过 IMAP 读取用户已配置的邮箱，并在其 CalDAV 日历中创建或删除日程。适用于按照用户给定的主题或条件，从邮件中查找具有明确日期、时间或截止期限的事项，并创建、同步或取消对应日程。
 metadata:
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # 邮件日程
