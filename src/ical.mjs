@@ -2,12 +2,7 @@ import ical from 'ical-generator';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { DateTime, Duration } from 'luxon';
 import { InputError, isObject } from './errors.mjs';
-
-export function parseDate(value) {
-  const date = DateTime.fromFormat(value, 'yyyy-MM-dd', { zone: 'utc' });
-  if (!date.isValid || date.toISODate() !== value) throw new InputError(`Invalid ISO 8601 date: ${value}`);
-  return date.toJSDate();
-}
+import { parseDate } from './dates.mjs';
 
 export function eventTime(value) {
   const iso = value.toUpperCase();

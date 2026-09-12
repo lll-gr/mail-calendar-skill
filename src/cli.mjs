@@ -8,14 +8,14 @@ import { MAIL_PROVIDERS, CALENDAR_PROVIDERS } from './providers.mjs';
 import { StateStore, mailboxKey } from './state.mjs';
 import { imapFolders, imapSearch, imapPending, imapGet, withImap } from './imap.mjs';
 import { calendarList, calendarCreate, calendarDelete } from './caldav.mjs';
-import { MailCalError, InputError, NotFoundError, isObject } from './errors.mjs';
+import { MailCalError, InputError, NotFoundError, isObject, positiveInteger as parsePositiveInteger } from './errors.mjs';
 
 export const VERSION = manifest.version;
 const emit = data => process.stdout.write(JSON.stringify({ ok: true, data }, null, 2) + '\n');
 
 export function readInput(path, label, array = false) {
   let value;
-  try { value = JSON.parse(readFileSync(path === '-' ? 0 : path, 'utf8').replace(/^\uFEFF/, '')); }
+  try { value = JSON.parse(readFileSync(path === '-' ? 0 : path, 'utf8')); }
   catch { throw new InputError(`Cannot read ${label} JSON`); }
   if (array ? !Array.isArray(value) || !value.every(isObject) : !isObject(value)) {
     throw new InputError(array ? `${label} JSON must be an array of objects` : `${label} JSON must be an object`);
@@ -24,8 +24,9 @@ export function readInput(path, label, array = false) {
 }
 
 const positiveInteger = value => {
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) throw new InvalidArgumentError('Must be a positive integer');
-  return Number(value);
+  const parsed = parsePositiveInteger(value);
+  if (parsed === undefined) throw new InvalidArgumentError('Must be a positive integer');
+  return parsed;
 };
 const repeat = (value, previous) => [...previous, value];
 const folderOption = command => command.option('--folder <name>', 'IMAP folder', 'INBOX');

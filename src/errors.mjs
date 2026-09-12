@@ -19,10 +19,17 @@ export class InputError extends MailCalError {
 }
 export const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-export function normalizeUid(value) {
+// A decimal integer that is at least one and fits a safe integer. Numeric strings are
+// accepted so a UID read off the wire and the same UID passed on the command line agree.
+export function positiveInteger(value) {
   const text = String(value ?? '');
-  if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text)) || Number(text) < 1) {
-    throw new InputError(`Invalid message UID: ${text}`);
-  }
-  return String(Number(text));
+  if (!/^\d+$/.test(text)) return undefined;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : undefined;
+}
+
+export function normalizeUid(value) {
+  const uid = positiveInteger(value);
+  if (uid === undefined) throw new InputError(`Invalid message UID: ${String(value ?? '')}`);
+  return String(uid);
 }

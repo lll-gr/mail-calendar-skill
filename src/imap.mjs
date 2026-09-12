@@ -3,7 +3,7 @@ import { MailParser } from 'mailparser';
 import { htmlToText } from 'html-to-text';
 import { DateTime } from 'luxon';
 import { ConnectionFailure, NotFoundError, InputError, MailCalError, normalizeUid } from './errors.mjs';
-import { parseDate } from './ical.mjs';
+import { parseSince } from './dates.mjs';
 import { StateStore, mailboxKey } from './state.mjs';
 
 export function imapOptions(settings) {
@@ -29,20 +29,6 @@ export async function withImap(settings, operation, Client = ImapFlow) {
   } finally {
     try { await client.logout(); } catch { client.close(); }
   }
-}
-
-export function parseSince(value, now = new Date()) {
-  const text = value.trim();
-  const relative = text.match(/^(\d+)([dw])$/i);
-  if (!relative) {
-    try { return parseDate(text); } catch { throw new InputError('--since must be YYYY-MM-DD, Nd, or Nw'); }
-  }
-  const date = new Date(0);
-  date.setUTCFullYear(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Number(relative[1]) * (relative[2].toLowerCase() === 'w' ? 7 : 1);
-  date.setUTCDate(date.getUTCDate() - days);
-  if (!Number.isFinite(date.getTime())) throw new InputError('Invalid --since range');
-  return date;
 }
 
 export function searchCriteria(args, incremental = false) {

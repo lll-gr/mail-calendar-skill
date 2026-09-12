@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { v5 as uuidv5 } from 'uuid';
-import { readJson, writeJson } from './config.mjs';
+import { readJson, writeJson } from './storage.mjs';
 import { ConfigError, NotFoundError, isObject, normalizeUid } from './errors.mjs';
 
 export const mailboxKey = settings => uuidv5(`${settings.host.toLowerCase()}\x1f${settings.address.toLowerCase()}`, uuidv5.URL);
@@ -11,6 +11,9 @@ export class StateStore {
     this.path = path;
     this.data = existsSync(path) ? readJson(path, 'State') : emptyState('');
     if (this.data.version !== 1 || !isObject(this.data.folders)) throw new ConfigError(`Unsupported or invalid state file: ${path}`);
+    // Folders are keyed by the user-supplied `--folder` name, so drop the prototype:
+    // a folder literally named "__proto__" must stay an ordinary key when it is set.
+    this.data.folders = Object.assign(Object.create(null), this.data.folders);
   }
   save() { writeJson(this.path, this.data, true); }
   ensureMailbox(key) {
@@ -23,7 +26,7 @@ export class StateStore {
     if (!isObject(value) || String(value.uidvalidity ?? '') !== validity) {
       if (!create) return undefined;
       value = { uidvalidity: validity, last_scanned_uid: 0, updated_at: '', messages: Object.create(null) };
-      Object.defineProperty(this.data.folders, name, { value, enumerable: true, configurable: true, writable: true });
+      this.data.folders[name] = value;
     }
     if (!isObject(value.messages) || !Number.isSafeInteger(value.last_scanned_uid) || value.last_scanned_uid < 0) {
       throw new ConfigError(`Invalid message state for folder: ${name}`);

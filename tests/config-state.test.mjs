@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigStore, configInit, storageDirectory, makePrivate, tightenWindowsAcl, validateMailSettings } from '../src/config.mjs';
+import { ConfigStore, configInit, storageDirectory, validateMailSettings } from '../src/config.mjs';
+import { makePrivate, tightenWindowsAcl } from '../src/storage.mjs';
 import { detectMailProvider } from '../src/providers.mjs';
 import { StateStore, mailboxKey } from '../src/state.mjs';
 import { ConfigError, InputError, NotFoundError } from '../src/errors.mjs';
@@ -109,6 +110,13 @@ test('UIDVALIDITY or mailbox changes start a fresh generation', t => {
   assert.deepEqual(state.pending('mailbox-1', 'INBOX', 'new', 10).map(item => item.uid), ['1']);
   assert.throws(() => state.currentUidvalidity('mailbox-2', 'INBOX'), ConfigError);
   assert.equal(state.cursor('mailbox-2', 'INBOX', 'new'), 0);
+});
+
+test('a folder named __proto__ is stored as an ordinary key', t => {
+  const path = join(temporaryDirectory(t), 'state.json');
+  new StateStore(path).recordDiscovered('mailbox-1', '__proto__', '777', [{ uid: '10' }], 10);
+  assert.equal(new StateStore(path).cursor('mailbox-1', '__proto__', '777'), 10);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(path, 'utf8')).folders), ['__proto__']);
 });
 
 test('reads a Python version 1 state document without rewriting it', t => {
