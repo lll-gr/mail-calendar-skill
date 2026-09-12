@@ -34,18 +34,18 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Check version consistency
-        run: npm run version:check
+        run: npm run version:check -- --source
       - name: Check release tag
         if: startsWith(github.ref, 'refs/tags/')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node tools/version.mjs --check --tag "$RELEASE_TAG"
+        run: node tools/version.mjs --check --source --tag "$RELEASE_TAG"
         shell: bash
       - run: npm run build
+        env:
+          MAILCAL_BUILD_SOURCE: ${{ github.sha }}
+      - run: npm run version:check
       - run: npm test
-      - name: Ensure tagged installation files were committed
-        if: startsWith(github.ref, 'refs/tags/')
-        run: git diff --exit-code -- skills/mail-calendar/
       - name: Check Skill discovery
         if: matrix.os == 'ubuntu-latest' && matrix.node == 24
         env:
@@ -64,7 +64,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
-          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -73,10 +72,33 @@ jobs:
       - name: Check release version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node tools/version.mjs --check --tag "$RELEASE_TAG"
+        run: node tools/version.mjs --check --source --tag "$RELEASE_TAG"
       - run: npm run build
+        env:
+          MAILCAL_BUILD_SOURCE: ${{ github.sha }}
+      - run: npm run version:check
       - run: npm run test:bundle
-      - run: git diff --exit-code -- skills/mail-calendar/
+      - name: Update installable files on main
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if [ "$(git rev-parse origin/main)" != "$SOURCE_SHA" ]; then
+            echo "main has moved beyond this tag; publish its archive without changing main."
+            exit 0
+          fi
+          git add -- skills/mail-calendar/SKILL.md skills/mail-calendar/scripts/mailcal.mjs
+          if git diff --cached --quiet; then
+            echo "Installable files already match this release build."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build: publish ${RELEASE_TAG} skill"
+          git push origin HEAD:refs/heads/main
       - name: Publish Skill archive and checksum
         shell: bash
         env:

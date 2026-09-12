@@ -274,7 +274,7 @@ npm run build
 npm test
 ```
 
-开发时修改 `src/`，使用 esbuild 把源码和运行依赖打包、压缩为 `skills/mail-calendar/scripts/mailcal.mjs`。`package-lock.json` 固定依赖版本。生成文件纳入 Git，方便安装工具直接获取；请通过修改源码和重新构建来更新它们。`scripts/` 只包含可执行的 `.mjs`。
+开发时修改 `src/`，使用 esbuild 把源码和运行依赖打包、压缩为 `skills/mail-calendar/scripts/mailcal.mjs`。`package-lock.json` 固定依赖版本。本地构建用于预览和测试，正式发布由 tag 流水线重新构建并提交生成文件。`scripts/` 只包含可执行的 `.mjs`。
 
 测试使用本地模拟数据和本机 IMAP/CalDAV 测试服务器，不会连接真实邮箱或日历。测试还会将整个 Skill 复制到独立临时目录，在没有 `node_modules` 的情况下运行打包脚本。实际账号配置完成后，请再执行：
 
@@ -286,13 +286,12 @@ node skills/mail-calendar/scripts/mailcal.mjs config test
 
 提交 PR、推送到 `main` 或手动运行时，流水线只执行构建和测试。推送 `v*` tag 才触发发布。所有检查在 Windows、macOS、Linux 上分别使用 Node.js 22 和 24 执行；Linux / Node.js 24 还会检查 `npx skills` 能否发现该 Skill。
 
-版本以根目录 `package.json` 为准。`npm run build` 自动同步到 `SKILL.md` 的 `metadata.version`，脚本的 `--version` 也来自同一版本。发布检查要求 tag（如 `v0.1.1`）、`package.json`、`package-lock.json` 和 Skill 版本全部一致；tag 必须指向已提交对应构建文件的提交，重新构建后有差异就停止发布。
+版本以根目录 `package.json` 为准。发布前校验 tag（如 `v0.1.1`）、`package.json` 和 `package-lock.json` 的版本；CI 构建时同步 `SKILL.md` 的 `metadata.version` 和脚本的 `--version`，然后再次校验。无需在创建 tag 前提交本地构建文件。CI 生成脚本的开头会记录版本和来源提交 SHA；本地构建标记为 `source: local`。
 
 准备一个新版本，例如 `0.1.1`：
 
 ```bash
-npm run release:prepare -- 0.1.1
-npm test
+npm run release:prepare -- 0.1.1 --no-build
 git add package.json package-lock.json skills/mail-calendar/
 git commit -m "release: v0.1.1"
 git tag v0.1.1
@@ -300,17 +299,17 @@ git push origin main
 git push origin v0.1.1
 ```
 
-`release:prepare` 更新项目、锁文件和 Skill 的版本，并重新构建脚本；不会自动提交、创建 tag 或推送。首次发布时需先把源码、测试、构建工具和流水线一并提交。支持语义版本和 `v0.1.1-rc.1` 等预发布 tag。
+`release:prepare -- <版本> --no-build` 只准备版本，构建交给 CI；去掉 `--no-build` 可在本地预览构建。此命令不会自动提交、创建 tag 或推送；源码变更也应提交到 tag 指向的提交。支持语义版本和 `v0.1.1-rc.1` 等预发布 tag。
 
-Tag 的全部检查通过后，流水线发布 GitHub Release，上传整个 Skill 的 `mail-calendar-v0.1.1.tar.gz` 及 SHA-256 校验文件；带预发布后缀的 tag 会标记为预发布。发布仅授予 `GITHUB_TOKEN` 的 `contents: write` 权限，不修改 `main` 或已创建的 tag。失败时在 Actions 中重新运行对应的 tag 工作流；手动新建运行只验证，不发布。
+Tag 的全部检查通过后，流水线重新构建，并由机器人将 `.mjs` 和 `SKILL.md` 提交回 `main`，再发布整个 Skill 的 `mail-calendar-v0.1.1.tar.gz` 及 SHA-256 校验文件。机器人提交消息为 `build: publish v0.1.1 skill`。如果 `main` 已前进到其他源码提交，只发布该 tag 的归档包，不覆盖 `main`。仅为发布授予 `GITHUB_TOKEN` 的 `contents: write` 权限；已创建的 tag 保持固定。失败时重新运行对应 tag 工作流；手动新建运行只验证，不发布。
 
-原来的安装命令 `npx skills add lll-gr/mail-calendar-skill -y -g` 获取默认分支中已提交的文件。安装指定的正式版本使用 tag URL（版本发布后）：
+原来的安装命令 `npx skills add lll-gr/mail-calendar-skill -y -g` 获取 `main` 中由 CI 更新的安装文件。安装指定的正式版本使用 Release 构建包（发布后）：
 
 ```bash
-npx skills add https://github.com/lll-gr/mail-calendar-skill/tree/v0.1.1/skills/mail-calendar -y -g
+npx skills add https://github.com/lll-gr/mail-calendar-skill/releases/download/v0.1.1/mail-calendar-v0.1.1.tar.gz -y -g
 ```
 
-这样安装的是 tag 固定的版本，仍然无需发布 npm 包。
+这样安装的是 CI 根据 tag 构建的版本。Tag 下的源码目录不一定包含对应的新构建，因此指定正式版本时使用 Release 包，仍然无需发布 npm 包。
 
 ## 当前边界
 

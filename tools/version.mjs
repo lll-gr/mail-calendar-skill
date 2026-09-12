@@ -57,10 +57,10 @@ export async function readVersionState(directory = root) {
   return { manifest, lock, skill };
 }
 
-export function checkVersionState({ manifest, lock, skill }, tag) {
+export function checkVersionState({ manifest, lock, skill }, tag, { includeSkill = true } = {}) {
   const version = validateVersion(manifest.version);
   if (lock.version !== version || lock.packages?.['']?.version !== version) throw new Error('package-lock.json version does not match package.json');
-  if (skillVersion(skill) !== version) throw new Error('Skill metadata.version does not match package.json; run npm run build');
+  if (includeSkill && skillVersion(skill) !== version) throw new Error('Skill metadata.version does not match package.json; run npm run build');
   if (tag !== undefined && tag !== `v${version}`) throw new Error(`Tag ${tag} does not match project and Skill version v${version}`);
   return version;
 }
@@ -91,14 +91,20 @@ export async function prepareVersion(version, directory = root) {
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   try {
     const args = process.argv.slice(2);
-    if (args[0] === '--check' && (args.length === 1 || (args.length === 3 && args[1] === '--tag'))) {
-      console.log(`Versions match: v${checkVersionState(await readVersionState(), args[2])}`);
-    } else if (args.length === 1 && args[0] !== '--check') {
+    if (args[0] === '--check') {
+      const flags = args.slice(1);
+      const source = flags.includes('--source');
+      if (source) flags.splice(flags.indexOf('--source'), 1);
+      if (flags.length && !(flags.length === 2 && flags[0] === '--tag')) throw new Error('Invalid version check arguments');
+      console.log(`Versions match: v${checkVersionState(await readVersionState(), flags[1], { includeSkill: !source })}`);
+    } else if (args.length === 1 || (args.length === 2 && args[1] === '--no-build')) {
       await prepareVersion(args[0]);
-      const built = spawnSync(process.execPath, [resolve(root, 'tools/build.mjs')], { cwd: root, stdio: 'inherit', windowsHide: true });
-      if (built.error || built.status !== 0) throw new Error('Version updated, but build failed; fix the build before tagging');
-      console.log(`Prepared v${args[0]}. Test and commit the changed files before creating the tag.`);
-    } else throw new Error('Usage: node tools/version.mjs <version> | --check [--tag <tag>]');
+      if (args[1] !== '--no-build') {
+        const built = spawnSync(process.execPath, [resolve(root, 'tools/build.mjs')], { cwd: root, stdio: 'inherit', windowsHide: true });
+        if (built.error || built.status !== 0) throw new Error('Version updated, but build failed; fix the build before tagging');
+      }
+      console.log(`Prepared v${args[0]}. Commit the changed files before creating the tag.`);
+    } else throw new Error('Usage: node tools/version.mjs <version> [--no-build] | --check [--source] [--tag <tag>]');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

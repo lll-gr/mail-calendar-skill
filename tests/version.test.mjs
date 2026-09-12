@@ -32,6 +32,8 @@ test('tag, lockfile and Skill versions must all match the project', () => {
   assert.throws(() => checkVersionState(locked), /package-lock/);
   const drifted = state(); drifted.skill = withSkillVersion(skill, '0.2.0');
   assert.throws(() => checkVersionState(drifted), /metadata.version/);
+  assert.equal(checkVersionState(drifted, 'v0.3.0', { includeSkill: false }), '0.3.0');
+  assert.throws(() => checkVersionState(drifted, 'v0.4.0', { includeSkill: false }), /Tag/);
 });
 
 test('release preparation updates every version while retaining dependency resolutions', async t => {
@@ -73,4 +75,11 @@ test('release preparation CLI finishes its build and rejects a mismatched tag', 
   const result = await execute(process.execPath, [executable, '0.4.0'], { timeout: 5000 });
   assert.ok(result.stdout.includes('Built v0.4.0') && result.stdout.includes('Prepared v0.4.0'));
   await assert.rejects(execute(process.execPath, [executable, '--check', '--tag', 'v0.3.0'], { timeout: 5000 }), error => error.code === 1 && error.stderr.includes('Tag v0.3.0'));
+  writeFileSync(join(root, 'tools/build.mjs'), "throw new Error('This local build must not run');\n");
+  const prepared = await execute(process.execPath, [executable, '0.5.0', '--no-build'], { timeout: 5000 });
+  assert.ok(prepared.stdout.includes('Prepared v0.5.0'));
+  writeFileSync(join(root, 'skills/mail-calendar/SKILL.md'), skill);
+  const checked = await execute(process.execPath, [executable, '--check', '--source', '--tag', 'v0.5.0'], { timeout: 5000 });
+  assert.ok(checked.stdout.includes('Versions match: v0.5.0'));
+  await assert.rejects(execute(process.execPath, [executable, '--check'], { timeout: 5000 }), error => error.code === 1 && error.stderr.includes('metadata.version'));
 });
