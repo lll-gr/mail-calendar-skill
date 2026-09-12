@@ -1,6 +1,6 @@
 # 配置
 
-每次安装只配置一个邮箱和一个日历。Windows、macOS 和 Linux 都使用 Python 解析出的用户主目录，不读取路径环境变量，也不接受其他配置路径。
+每次安装只配置一个邮箱和一个日历。Windows、macOS 和 Linux 都使用 Node.js 解析出的用户主目录，不读取路径环境变量，也不接受其他配置路径。
 
 ## 固定位置
 
@@ -15,7 +15,7 @@
 - `credentials.json`：邮箱和日历使用的明文密码、客户端授权码或 OAuth token。
 - `state.json`：邮件扫描游标和处理结果，由 CLI 自动维护。
 
-旧配置路径、旧凭据字段、凭据迁移和环境变量回退都不受支持。升级后请重新执行 `config init`。
+兼容 Python 0.2 版本使用的同目录 `version: 1` 配置、凭据和状态文件，升级到 Node.js 版本后无需重新初始化。其他旧配置路径、旧凭据字段和环境变量回退都不受支持。
 
 ## 文件格式
 
@@ -64,7 +64,7 @@
 优先使用服务商预设：
 
 ```text
-python -X utf8 scripts/mailcal.py config init \
+node scripts/mailcal.mjs config init \
   --email person@qq.com \
   --mail-provider qq \
   --calendar-provider qq \
@@ -83,31 +83,31 @@ Codex 和用户终端只要运行在同一个系统用户下，就会解析到�
 
 ## Codex 定时任务权限
 
-Skill 本身不能授予网络或沙箱外文件权限，自动化任务也没有可绑定到任务 ID 的独立网络权限开关。Codex 定时任务默认无人值守运行，因此应先为 `config test`、`mail` 和 `calendar` 命令配置精确规则，重启 Codex 后再创建或启用任务；不要允许任意 `python` 命令。每条 CLI 调用都应是独立的简单命令，避免在同一条 shell 命令中拼接其他操作。
+Skill 本身不能授予网络或沙箱外文件权限，自动化任务也没有可绑定到任务 ID 的独立网络权限开关。Codex 定时任务默认无人值守运行，因此应先为 `config test`、`mail` 和 `calendar` 命令配置精确规则，重启 Codex 后再创建或启用任务；不要允许任意 `node` 命令。每条 CLI 调用都应是独立的简单命令，避免在同一条 shell 命令中拼接其他操作。
 
 把下面示例中的 `<USER>` 替换为当前用户名，并保存到 `~/.codex/rules/mail-calendar.rules`：
 
 ```python
 prefix_rule(
-    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "config", "test"],
+    pattern = ["node", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.mjs", "config", "test"],
     decision = "allow",
     justification = "Allow only the mail-calendar connectivity test outside the sandbox.",
 )
 
 prefix_rule(
-    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "mail", ["folders", "search", "pending", "get", "ack", "retry", "state"]],
+    pattern = ["node", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.mjs", "mail", ["folders", "search", "pending", "get", "ack", "retry", "state"]],
     decision = "allow",
     justification = "Allow only mail-calendar IMAP and mail state operations outside the sandbox.",
 )
 
 prefix_rule(
-    pattern = ["python", "-X", "utf8", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.py", "calendar", ["list", "create", "delete"]],
+    pattern = ["node", "C:\\Users\\<USER>\\.codex\\skills\\mail-calendar\\scripts\\mailcal.mjs", "calendar", ["list", "create", "delete"]],
     decision = "allow",
     justification = "Allow only mail-calendar CalDAV operations outside the sandbox.",
 )
 ```
 
-规则刻意不放行 `config init`、其他脚本或普通 Python 命令。新增或修改规则后重启 Codex，并用 `codex execpolicy check --pretty --rules <规则文件> -- <命令>` 检查实际决策。
+规则刻意不放行 `config init`、其他脚本或普通 Node.js 命令。使用 `npx skills` 安装时，脚本可能通过符号链接关联到 `~/.agents/skills/mail-calendar/`；请使用实际调用命令中的绝对路径配置规则。从 Python 版本升级后，旧的 Python 规则不匹配新的 Node.js 调用，需要更新。新增或修改规则后重启 Codex，并用 `codex execpolicy check --pretty --rules <规则文件> -- <命令>` 检查实际决策。
 
 ## 服务商预设
 
@@ -122,7 +122,7 @@ prefix_rule(
 执行：
 
 ```text
-python -X utf8 scripts/mailcal.py calendar list
+node scripts/mailcal.mjs calendar list
 ```
 
 如果返回多个日历，把选中日历的 `url` 写入 `~/.mail-calendar-skill/settings.json` 的 `calendar.collection_url`。也可以在执行 `calendar create` 或 `calendar delete` 时传入 `--calendar-url`。

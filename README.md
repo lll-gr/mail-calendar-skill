@@ -15,7 +15,8 @@
 - 重复创建相同 UID 的日程时更新同一个 `.ics` 资源。
 - Windows、macOS 和 Linux 统一使用 `~/.mail-calendar-skill/` 下的本地 JSON 文件。
 - 非敏感设置与明文凭据分文件保存，所有协议代码通过同一个访问层取得运行时配置。
-- CLI 只使用 Python 标准库，没有可选凭据依赖。
+- 安装后只需要 Node.js，运行依赖已打包进 `.mjs`，无需安装 Python 或执行 `npm install`。
+- IMAP、邮件解析、CalDAV 和日程生成分别使用 ImapFlow、MailParser、tsdav 和 ical-generator。
 
 ## 工作方式
 
@@ -24,11 +25,11 @@
    ↓
 Codex 判断本次需要关注的邮件和时间事项
    ↓
-mailcal.py 通过 IMAP 读取邮件
+mailcal.mjs 通过 IMAP 读取邮件
    ↓
 Codex 提取标题、时间、地点、链接和提醒
    ↓
-mailcal.py 通过 CalDAV 写入日历
+mailcal.mjs 通过 CalDAV 写入日历
    ↓
 state.json 记录游标与处理结果
 ```
@@ -39,29 +40,29 @@ CLI 不依赖任何 AI SDK，也不需要单独的 OpenAI API Key。语义理解
 
 ```text
 mail-calendar-skill/
+├── src/                       # 可读 JavaScript 源码
+├── tests/                     # 配置、协议和独立运行测试
+├── tools/build.mjs            # 打包和压缩
+├── tools/version.mjs          # 版本同步和发布准备
+├── package.json
+├── package-lock.json
+├── .github/workflows/ci.yml   # 跨平台测试和 tag 发布
 ├── README.md
-└── mail-calendar/
-    ├── SKILL.md
-    ├── agents/
-    │   └── openai.yaml
-    ├── examples/
-    │   ├── credentials.example.json
-    │   └── settings.example.json
-    ├── references/
-    │   ├── commands.md
-    │   ├── configuration.md
-    │   ├── event-json.md
-    │   └── processing-state.md
-    └── scripts/
-        ├── mailcal.py
-        └── test_mailcal.py
+└── skills/
+    └── mail-calendar/
+        ├── SKILL.md
+        ├── agents/openai.yaml
+        ├── examples/
+        ├── references/
+        └── scripts/
+            └── mailcal.mjs             # 自动生成，包含第三方依赖
 ```
 
-真正的 Skill 是 `mail-calendar/` 子目录；仓库根目录只保存 GitHub 项目说明。
+真正的 Skill 是 `skills/mail-calendar/` 子目录。安装时会复制这个目录；根目录的 README、源码、构建工具和测试不会被安装。
 
 ## 环境要求
 
-- Python 3.10 或更高版本
+- Node.js 22.13 或更高的 22.x 版本，或 Node.js 24 及以上版本；推荐 Node.js 24 LTS
 - 能访问目标邮箱的 IMAP 服务
 - 能访问目标日历的 CalDAV 服务
 - Codex（使用 Skill 时）
@@ -70,29 +71,58 @@ mail-calendar-skill/
 
 ## 安装 Skill
 
+### 使用 npx 一键安装（推荐）
+
+从 GitHub 仓库安装到当前用户目录，跳过确认提示：
+
+```bash
+npx skills add lll-gr/mail-calendar-skill -y -g
+```
+
+只安装到 Codex：
+
+```bash
+npx skills add lll-gr/mail-calendar-skill --skill mail-calendar -a codex -y -g
+```
+
+`-g` 表示安装到用户目录，`-y` 表示跳过安装确认，`-a codex` 表示指定 Codex。不加 `-a` 时由安装工具选择检测到的 Agent。只希望在当前项目中使用时，去掉 `-g`。
+
+安装工具会识别仓库里的 `skills/mail-calendar/SKILL.md`，并安装整个 Skill 目录，包括脚本、参考文档和配置示例。无需先克隆仓库，也无需将本项目发布成 npm 包；`npx` 运行的是 `skills` 安装工具，本项目从 GitHub 获取。安装方式参考 [skills 官方说明](https://github.com/vercel-labs/skills#install-a-skill)。
+
+查看仓库中可安装的 Skill，或查看已全局安装的 Skill：
+
+```bash
+npx skills add lll-gr/mail-calendar-skill --list
+npx skills list -g
+```
+
+安装后，在 Codex 中让模型使用 `$mail-calendar` 协助初始化邮箱和日历配置。`-y` 只跳过安装确认，邮箱和日历凭据仍需在初始化时由用户交互式输入。
+
+### 手动安装
+
 Codex 将一个包含 `SKILL.md` 的目录视为一个 Skill。个人 Skill 可以放在：
 
 ```text
 $HOME/.agents/skills/mail-calendar/
 ```
 
-克隆本仓库后，只复制 `mail-calendar/` 子目录。
+克隆本仓库后，只复制 `skills/mail-calendar/` 子目录。
 
-### Windows PowerShell
+#### Windows PowerShell
 
 ```powershell
 New-Item -ItemType Directory -Force "$HOME\.agents\skills" | Out-Null
-Copy-Item -Recurse -Force ".\mail-calendar" "$HOME\.agents\skills\mail-calendar"
+Copy-Item -Recurse -Force ".\skills\mail-calendar" "$HOME\.agents\skills\mail-calendar"
 ```
 
-### macOS / Linux
+#### macOS / Linux
 
 ```bash
 mkdir -p "$HOME/.agents/skills"
-cp -R ./mail-calendar "$HOME/.agents/skills/mail-calendar"
+cp -R ./skills/mail-calendar "$HOME/.agents/skills/mail-calendar"
 ```
 
-也可以让 Codex 的 `$skill-installer` 从 GitHub 仓库中的 `mail-calendar/` 子目录安装。Codex 通常会自动发现新增 Skill；如果没有出现，重启 Codex。
+也可以让 Codex 的 `$skill-installer` 从 GitHub 仓库中的 `skills/mail-calendar/` 子目录安装。Codex 通常会自动发现新增 Skill；如果没有出现，重启 Codex。
 
 Skill 的目录结构和加载位置可参考 [OpenAI 官方 Skills 文档](https://developers.openai.com/codex/skills)。
 
@@ -111,24 +141,24 @@ Skill 的目录结构和加载位置可参考 [OpenAI 官方 Skills 文档](http
 
 ## 初始化配置
 
-进入 Skill 目录：
+以下命令相对于 Skill 目录执行。使用 `npx` 安装后，可先通过 `npx skills list -g` 查看安装位置，再进入显示的安装目录；从仓库手动安装或直接试用时：
 
 ```bash
-cd mail-calendar
+cd skills/mail-calendar
 ```
 
 查看支持的服务商：
 
 ```bash
-python -X utf8 scripts/mailcal.py provider list
-python -X utf8 scripts/mailcal.py provider show mail qq
-python -X utf8 scripts/mailcal.py provider show calendar qq
+node scripts/mailcal.mjs provider list
+node scripts/mailcal.mjs provider show mail qq
+node scripts/mailcal.mjs provider show calendar qq
 ```
 
 以同一个 QQ 账号同时连接邮箱和日历为例：
 
 ```bash
-python -X utf8 scripts/mailcal.py config init \
+node scripts/mailcal.mjs config init \
   --email person@qq.com \
   --mail-provider qq \
   --calendar-provider qq \
@@ -141,18 +171,18 @@ python -X utf8 scripts/mailcal.py config init \
 测试连接：
 
 ```bash
-python -X utf8 scripts/mailcal.py config test
+node scripts/mailcal.mjs config test
 ```
 
 如果账号中有多个日历，可以先查看列表：
 
 ```bash
-python -X utf8 scripts/mailcal.py calendar list
+node scripts/mailcal.mjs calendar list
 ```
 
 然后把选中日历的 `url` 写入本地 `~/.mail-calendar-skill/settings.json` 的 `calendar.collection_url`。
 
-完整配置说明见 [`configuration.md`](mail-calendar/references/configuration.md)。
+完整配置说明见 [`configuration.md`](skills/mail-calendar/references/configuration.md)。
 
 ## 在 Codex 中使用
 
@@ -180,40 +210,40 @@ Skill 也支持根据描述自动触发；是否调用取决于用户请求与 `
 
 ### 定时任务权限
 
-Codex 定时任务访问 IMAP/CalDAV 时需要网络权限，维护 `~/.mail-calendar-skill/state.json` 时还需要写入项目目录之外的用户 home。自动化任务本身没有单独的网络权限开关，权限也不能绑定到某个任务 ID；应先为已安装脚本配置只覆盖 `config test`、`mail` 和 `calendar` 子命令的精确规则，重启 Codex 后再创建或启用任务。不要放行任意 Python 命令。规则示例和验证命令见 [`configuration.md`](mail-calendar/references/configuration.md#codex-定时任务权限)。
+Codex 定时任务访问 IMAP/CalDAV 时需要网络权限，维护 `~/.mail-calendar-skill/state.json` 时还需要写入项目目录之外的用户 home。自动化任务本身没有单独的网络权限开关，权限也不能绑定到某个任务 ID；应先为已安装脚本配置只覆盖 `config test`、`mail` 和 `calendar` 子命令的精确规则，重启 Codex 后再创建或启用任务。不要放行任意 Node.js 命令。规则示例和验证命令见 [`configuration.md`](skills/mail-calendar/references/configuration.md#codex-定时任务权限)。
 
 ## 直接使用 CLI
 
 获取新增且尚未处理的邮件头：
 
 ```bash
-python -X utf8 scripts/mailcal.py mail pending --since 30d --limit 50
+node scripts/mailcal.mjs mail pending --since 30d --limit 50
 ```
 
 读取一封邮件正文：
 
 ```bash
-python -X utf8 scripts/mailcal.py mail get --uid 123
+node scripts/mailcal.mjs mail get --uid 123
 ```
 
 把邮件标记为已处理：
 
 ```bash
-python -X utf8 scripts/mailcal.py mail ack --uid 123 --outcome ignored
-python -X utf8 scripts/mailcal.py mail ack --uid 124 --outcome created --event-uid EVENT_UID
+node scripts/mailcal.mjs mail ack --uid 123 --outcome ignored
+node scripts/mailcal.mjs mail ack --uid 124 --outcome created --event-uid EVENT_UID
 ```
 
 查看游标状态：
 
 ```bash
-python -X utf8 scripts/mailcal.py mail state
+node scripts/mailcal.mjs mail state
 ```
 
-详细参数见 [`commands.md`](mail-calendar/references/commands.md)，日程 JSON 格式见 [`event-json.md`](mail-calendar/references/event-json.md)。
+详细参数见 [`commands.md`](skills/mail-calendar/references/commands.md)，日程 JSON 格式见 [`event-json.md`](skills/mail-calendar/references/event-json.md)。
 
 ## 配置和运行数据
 
-所有系统都通过 Python 的用户 home 解析同一目录：
+所有系统都通过 Node.js 的用户 home 解析同一目录：
 
 | 文件 | 内容 |
 |---|---|
@@ -221,7 +251,7 @@ python -X utf8 scripts/mailcal.py mail state
 | `~/.mail-calendar-skill/credentials.json` | 明文密码、授权码或 token |
 | `~/.mail-calendar-skill/state.json` | 邮件 UID、部分邮件头和处理结果 |
 
-不支持其他旧路径、路径环境变量、命令行路径覆盖或旧凭据字段，也不会自动迁移旧配置。示例见 [`mail-calendar/examples/`](mail-calendar/examples/)。
+兼容 Python 0.2 版本的 `version: 1` 设置、凭据和状态文件，以及相同来源、标题和开始时间生成的日程 UID；从该版本升级无需重新配置。其他旧路径、路径覆盖和旧凭据字段不受支持。示例见 [`skills/mail-calendar/examples/`](skills/mail-calendar/examples/)。
 
 ## 增量处理与失败恢复
 
@@ -232,21 +262,55 @@ python -X utf8 scripts/mailcal.py mail state
 - 如果运行中断，未确认邮件会在下一轮继续出现。
 - `UIDVALIDITY` 变化时会自动开始新一代游标，避免 UID 重用造成误判。
 
-实现细节见 [`processing-state.md`](mail-calendar/references/processing-state.md)。
+实现细节见 [`processing-state.md`](skills/mail-calendar/references/processing-state.md)。
 
-## 测试
+## 开发、构建和测试
 
 在仓库根目录执行：
 
 ```bash
-python -X utf8 -m unittest discover -s mail-calendar/scripts -p "test_*.py" -v
+npm ci
+npm run build
+npm test
 ```
 
-测试使用本地模拟数据，不会连接真实邮箱或日历。实际账号配置完成后，请再执行：
+开发时修改 `src/`，使用 esbuild 把源码和运行依赖打包、压缩为 `skills/mail-calendar/scripts/mailcal.mjs`。`package-lock.json` 固定依赖版本。生成文件纳入 Git，方便安装工具直接获取；请通过修改源码和重新构建来更新它们。`scripts/` 只包含可执行的 `.mjs`。
+
+测试使用本地模拟数据和本机 IMAP/CalDAV 测试服务器，不会连接真实邮箱或日历。测试还会将整个 Skill 复制到独立临时目录，在没有 `node_modules` 的情况下运行打包脚本。实际账号配置完成后，请再执行：
 
 ```bash
-python -X utf8 mail-calendar/scripts/mailcal.py config test
+node skills/mail-calendar/scripts/mailcal.mjs config test
 ```
+
+### GitHub Actions 自动构建
+
+提交 PR、推送到 `main` 或手动运行时，流水线只执行构建和测试。推送 `v*` tag 才触发发布。所有检查在 Windows、macOS、Linux 上分别使用 Node.js 22 和 24 执行；Linux / Node.js 24 还会检查 `npx skills` 能否发现该 Skill。
+
+版本以根目录 `package.json` 为准。`npm run build` 自动同步到 `SKILL.md` 的 `metadata.version`，脚本的 `--version` 也来自同一版本。发布检查要求 tag（如 `v0.1.1`）、`package.json`、`package-lock.json` 和 Skill 版本全部一致；tag 必须指向已提交对应构建文件的提交，重新构建后有差异就停止发布。
+
+准备一个新版本，例如 `0.1.1`：
+
+```bash
+npm run release:prepare -- 0.1.1
+npm test
+git add package.json package-lock.json skills/mail-calendar/
+git commit -m "release: v0.1.1"
+git tag v0.1.1
+git push origin main
+git push origin v0.1.1
+```
+
+`release:prepare` 更新项目、锁文件和 Skill 的版本，并重新构建脚本；不会自动提交、创建 tag 或推送。首次发布时需先把源码、测试、构建工具和流水线一并提交。支持语义版本和 `v0.1.1-rc.1` 等预发布 tag。
+
+Tag 的全部检查通过后，流水线发布 GitHub Release，上传整个 Skill 的 `mail-calendar-v0.1.1.tar.gz` 及 SHA-256 校验文件；带预发布后缀的 tag 会标记为预发布。发布仅授予 `GITHUB_TOKEN` 的 `contents: write` 权限，不修改 `main` 或已创建的 tag。失败时在 Actions 中重新运行对应的 tag 工作流；手动新建运行只验证，不发布。
+
+原来的安装命令 `npx skills add lll-gr/mail-calendar-skill -y -g` 获取默认分支中已提交的文件。安装指定的正式版本使用 tag URL（版本发布后）：
+
+```bash
+npx skills add https://github.com/lll-gr/mail-calendar-skill/tree/v0.1.1/skills/mail-calendar -y -g
+```
+
+这样安装的是 tag 固定的版本，仍然无需发布 npm 包。
 
 ## 当前边界
 
@@ -258,8 +322,8 @@ python -X utf8 mail-calendar/scripts/mailcal.py config test
 
 ## 相关文档
 
-- [Skill 使用说明](mail-calendar/SKILL.md)
-- [CLI 命令参考](mail-calendar/references/commands.md)
-- [邮箱和日历配置](mail-calendar/references/configuration.md)
-- [日程 JSON 格式](mail-calendar/references/event-json.md)
-- [增量处理状态](mail-calendar/references/processing-state.md)
+- [Skill 使用说明](skills/mail-calendar/SKILL.md)
+- [CLI 命令参考](skills/mail-calendar/references/commands.md)
+- [邮箱和日历配置](skills/mail-calendar/references/configuration.md)
+- [日程 JSON 格式](skills/mail-calendar/references/event-json.md)
+- [增量处理状态](skills/mail-calendar/references/processing-state.md)

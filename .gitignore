@@ -1,5 +1,4 @@
 credentials.json
 settings.json
 state.json
-__pycache__/
-*.pyc
+node_modules/

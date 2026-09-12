@@ -1,0 +1,5 @@
+* text=auto
+*.mjs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+skills/mail-calendar/scripts/mailcal.mjs whitespace=-blank-at-eol linguist-generated=true
