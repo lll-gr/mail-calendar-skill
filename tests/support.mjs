@@ -60,6 +60,14 @@ export async function davServer(t, { redirect = false, missingWellKnown = false,
   return { base: `http://127.0.0.1:${server.address().port}/`, requests, events };
 }
 
+// IMAP sequence sets are comma separated and may use inclusive ranges.
+export const expandUidSet = set => set.split(',').flatMap(part => {
+  const range = part.match(/^(\d+):(\d+)$/);
+  if (!range) return [Number(part)];
+  const [from, to] = [Number(range[1]), Number(range[2])];
+  return Array.from({ length: Math.abs(to - from) + 1 }, (_, offset) => Math.min(from, to) + offset);
+}).filter(Number.isSafeInteger);
+
 export async function imapServer(t) {
   const commands = [];
   const sockets = new Set();
@@ -84,12 +92,17 @@ export async function imapServer(t) {
         else if (upper.startsWith('EXAMINE ') || upper.startsWith('SELECT ')) socket.write(`* FLAGS (\\Seen)\r\n* 2 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 777] UIDs\r\n* OK [UIDNEXT 13] next\r\n${tag} OK [READ-ONLY] EXAMINE\r\n`);
         else if (upper.startsWith('UID SEARCH ')) socket.write(`* SEARCH 10 12\r\n${tag} OK SEARCH\r\n`);
         else if (upper.startsWith('UID FETCH ')) {
-          const uid = command.match(/^UID FETCH (\d+)/i)?.[1] ?? '10';
-          const data = upper.includes('HEADER.FIELDS') ? header(uid) : rawMessage;
-          const section = upper.includes('HEADER.FIELDS') ? 'HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO DATE)' : '';
-          socket.write(`* ${uid === '10' ? '1' : '2'} FETCH (UID ${uid} RFC822.SIZE ${data.length} BODY[${section}] {${data.length}}\r\n`);
-          socket.write(data);
-          socket.write(`)\r\n${tag} OK FETCH\r\n`);
+          const set = command.match(/^UID FETCH ([0-9,:*]+)/i)?.[1] ?? '10';
+          const wantsHeaders = upper.includes('HEADER.FIELDS');
+          const section = wantsHeaders ? 'HEADER.FIELDS (MESSAGE-ID SUBJECT FROM TO DATE)' : '';
+          // One untagged FETCH per requested UID, in the order the set listed them.
+          for (const uid of expandUidSet(set)) {
+            const data = wantsHeaders ? header(uid) : rawMessage;
+            socket.write(`* ${uid === 10 ? '1' : '2'} FETCH (UID ${uid} RFC822.SIZE ${data.length} BODY[${section}] {${data.length}}\r\n`);
+            socket.write(data);
+            socket.write(')\r\n');
+          }
+          socket.write(`${tag} OK FETCH\r\n`);
         } else if (upper === 'LOGOUT') { socket.end(`* BYE logging out\r\n${tag} OK LOGOUT\r\n`); }
         else socket.write(`${tag} OK command\r\n`);
       }

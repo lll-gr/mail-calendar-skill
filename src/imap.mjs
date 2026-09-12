@@ -90,25 +90,38 @@ async function openMailbox(client, folder) {
   return String(mailbox.uidValidity);
 }
 
-async function fetchHeader(client, uid) {
-  const fetched = await client.fetchOne(uid, { headers: ['MESSAGE-ID', 'SUBJECT', 'FROM', 'TO', 'DATE'] }, { uid: true });
-  if (!fetched || !fetched.headers) return undefined;
-  const { text, attachments, ...header } = await parseMessage(fetched.headers, uid);
-  return header;
+const HEADER_FIELDS = ['MESSAGE-ID', 'SUBJECT', 'FROM', 'TO', 'DATE'];
+// A single sequence set has to stay within the server's command line limit (Dovecot
+// rejects anything past 64 KB by default), so headers are requested in bounded batches.
+const HEADER_BATCH = 200;
+
+// Returns a Map keyed by canonical UID string. UID FETCH does not promise reply
+// ordering and the server can interleave unrelated FETCH responses, so the result is
+// indexed by the UID the response carries and never by position.
+async function fetchHeaders(client, uids) {
+  const requested = new Set(uids);
+  const headers = new Map();
+  for (let index = 0; index < uids.length; index += HEADER_BATCH) {
+    const batch = uids.slice(index, index + HEADER_BATCH);
+    for (const message of await client.fetchAll(batch.join(','), { headers: HEADER_FIELDS }, { uid: true })) {
+      const uid = String(message.uid);
+      if (!requested.has(uid) || !message.headers) continue;
+      const { text, attachments, ...header } = await parseMessage(message.headers, uid);
+      headers.set(uid, header);
+    }
+  }
+  return headers;
 }
 
 export const imapFolders = settings => withImap(settings, async client => (await client.list()).map(folder => ({ name: folder.path, raw: `(${[...folder.flags].join(' ')}) "${folder.delimiter ?? ''}" "${folder.path}"` })));
 
-export const imapSearch = (settings, args) => withImap(settings, async client => {
+export const imapSearch = (settings, args, Client = ImapFlow) => withImap(settings, async client => {
   await openMailbox(client, args.folder);
-  const uids = await client.search(searchCriteria(args), { uid: true });
-  const result = [];
-  for (const uid of (uids || []).slice(-args.limit).reverse()) {
-    const header = await fetchHeader(client, String(uid));
-    if (header) result.push(header);
-  }
-  return result;
-});
+  const uids = (await client.search(searchCriteria(args), { uid: true }) || []).slice(-args.limit).map(normalizeUid);
+  const headers = await fetchHeaders(client, uids);
+  // Newest first, skipping any message the server did not return.
+  return uids.reverse().map(uid => headers.get(uid)).filter(Boolean);
+}, Client);
 
 export const imapGet = (settings, folder, rawUid) => withImap(settings, async client => {
   const uid = normalizeUid(rawUid);
@@ -123,12 +136,15 @@ export const imapPending = (settings, args, statePath, Client = ImapFlow) => wit
   const key = mailboxKey(settings);
   const validity = await openMailbox(client, args.folder);
   const before = store.cursor(key, args.folder, validity);
-  const uids = (await client.search(searchCriteria(args, true), { uid: true }) || []).filter(uid => uid > before).sort((a, b) => a - b);
+  const uids = (await client.search(searchCriteria(args, true), { uid: true }) || [])
+    .filter(uid => uid > before).sort((a, b) => a - b).slice(0, args.scanLimit).map(normalizeUid);
+  const headers = await fetchHeaders(client, uids);
   const discovered = [];
   let after = before;
-  for (const rawUid of uids.slice(0, args.scanLimit)) {
-    const uid = normalizeUid(rawUid);
-    const header = await fetchHeader(client, uid);
+  for (const uid of uids) {
+    // A missing header stops the scan rather than being skipped: the cursor must not
+    // advance past a gap, or the messages beyond it would never be discovered.
+    const header = headers.get(uid);
     if (!header) break;
     discovered.push(header);
     after = Number(uid);

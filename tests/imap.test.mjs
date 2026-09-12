@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
-import { imapOptions, withImap, parseMessage, imapPending, searchCriteria } from '../src/imap.mjs';
+import { imapOptions, withImap, parseMessage, imapPending, imapSearch, searchCriteria } from '../src/imap.mjs';
 import { parseSince } from '../src/dates.mjs';
 import { StateStore, mailboxKey } from '../src/state.mjs';
 import { InputError, ConnectionFailure } from '../src/errors.mjs';
@@ -53,6 +53,7 @@ class FakeImap extends EventEmitter {
   static validity = 777n;
   static opened;
   static query;
+  static batches = [];
   async connect() {}
   async logout() {}
   close() {}
@@ -62,6 +63,16 @@ class FakeImap extends EventEmitter {
     assert.deepEqual(options, { uid: true });
     assert.ok(query.headers.includes('MESSAGE-ID'));
     return Number(uid) === FakeImap.failUid ? false : { uid: Number(uid), headers: header(uid) };
+  }
+  async fetchAll(set, query, options) {
+    FakeImap.batches.push(String(set));
+    assert.deepEqual(options, { uid: true });
+    assert.ok(query.headers.includes('MESSAGE-ID'));
+    // A message that cannot be fetched is simply absent from the batch, the way a
+    // UID that vanished between SEARCH and FETCH would be.
+    return String(set).split(',').map(Number)
+      .filter(uid => uid !== FakeImap.failUid)
+      .map(uid => ({ uid, headers: header(uid) }));
   }
 }
 
@@ -90,6 +101,29 @@ test('incremental processing preserves unacknowledged mail and stops before fail
   const generation = await imapPending(mail, args, path, FakeImap);
   assert.equal(generation.cursor_before, 0);
   assert.deepEqual(generation.pending.map(item => item.uid), ['1']);
+});
+
+test('headers are fetched in bounded batches instead of one command per message', async t => {
+  const path = join(temporaryDirectory(t), 'state.json');
+  const mail = { ...settings().mail, secret: 'synthetic-password' };
+  FakeImap.validity = 4242n;
+  FakeImap.failUid = undefined;
+  FakeImap.uids = Array.from({ length: 250 }, (_, index) => index + 1);
+  FakeImap.batches = [];
+  const result = await imapPending(mail, { folder: 'INBOX', since: '30d', limit: 50, scanLimit: 250 }, path, FakeImap);
+  assert.equal(result.discovered, 250, 'every message in the scan window is discovered');
+  assert.deepEqual(FakeImap.batches.map(batch => batch.split(',').length), [200, 50], 'one command per batch, chunked at 200');
+});
+
+test('search returns the newest headers first and skips messages the server omits', async () => {
+  const mail = { ...settings().mail, secret: 'synthetic-password' };
+  FakeImap.validity = 4243n;
+  FakeImap.uids = [10, 12, 14];
+  FakeImap.failUid = 12;
+  const result = await imapSearch(mail, { folder: 'INBOX', since: '30d', limit: 50 }, FakeImap);
+  assert.deepEqual(result.map(item => item.uid), ['14', '10']);
+  assert.equal(result[0].subject, 'Meeting 14');
+  FakeImap.failUid = undefined;
 });
 
 test('connection failures are JSON-safe and do not leak protocol error payloads', async () => {
