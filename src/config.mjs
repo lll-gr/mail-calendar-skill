@@ -75,7 +75,8 @@ export class ConfigStore {
     return value;
   }
   calendar(withSecret = true) {
-    const value = validateCalendarSettings(this.loadSettings());
+    const settings = this.loadSettings();
+    const value = { ...validateCalendarSettings(settings), timezone: settings.timezone };
     if (withSecret) value.secret = this.loadCredentials().calendar.secret;
     return value;
   }

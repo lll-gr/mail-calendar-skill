@@ -41,7 +41,7 @@ test('the parser exposes the documented command tree', () => {
   assert.deepEqual(leaves(node(program, 'provider')), ['list', 'show']);
   assert.deepEqual(leaves(node(program, 'config')), ['init', 'show', 'test']);
   assert.deepEqual(leaves(node(program, 'mail')), ['folders', 'search', 'pending', 'get', 'ack', 'retry', 'state']);
-  assert.deepEqual(leaves(node(program, 'calendar')), ['list', 'create', 'delete']);
+  assert.deepEqual(leaves(node(program, 'calendar')), ['list', 'events', 'get', 'create', 'delete']);
   assert.deepEqual(node(program, 'provider show').registeredArguments.map(argument => argument.name()), ['kind', 'name']);
 });
 
@@ -52,6 +52,7 @@ test('option defaults are kept', () => {
   assert.deepEqual(node(program, 'mail search').opts(), { folder: 'INBOX', since: '30d', limit: 50 });
   assert.deepEqual(node(program, 'mail ack').opts(), { folder: 'INBOX', uid: [], outcome: 'processed' });
   assert.deepEqual(node(program, 'config init').opts(), { mailProvider: 'auto', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(node(program, 'calendar events').opts(), { limit: 50 });
 });
 
 test('building the parser does not read configuration', () => {
@@ -67,6 +68,8 @@ test('a parse error surfaces as a commander error rather than exiting the proces
   // first calls process.exit() here, which would take the test runner down with it.
   await assert.rejects(buildParser().parseAsync(['mail', 'search', '--limit', '0'], { from: 'user' }), error => error.code === 'commander.invalidArgument');
   await assert.rejects(buildParser().parseAsync(['mail', 'pending', '--subject', 'x'], { from: 'user' }), error => error.code === 'commander.unknownOption');
+  await assert.rejects(buildParser().parseAsync(['calendar', 'events', '--start', '2026-09-13'], { from: 'user' }), error => error.code === 'commander.missingMandatoryOptionValue');
+  await assert.rejects(buildParser().parseAsync(['calendar', 'events', '--start', '2026-09-13', '--end', '2026-09-14', '--limit', '0'], { from: 'user' }), error => error.code === 'commander.invalidArgument');
 });
 
 test('the context reads the credentials file only when a secret is asked for', t => {

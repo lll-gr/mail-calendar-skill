@@ -215,6 +215,22 @@ Codex 定时任务访问 IMAP/CalDAV 时需要网络权限，维护 `~/.mail-cal
 
 ## 直接使用 CLI
 
+读取指定日期范围内的日程（结束日期不包含在范围内）：
+
+```bash
+node scripts/mailcal.mjs calendar events --start 2026-09-13 --end 2026-09-14
+node scripts/mailcal.mjs calendar events --start 2026-09-13 --end 2026-09-20 --summary 会议 --limit 100
+```
+
+读取单条日程详情，包括原始 iCalendar：
+
+```bash
+node scripts/mailcal.mjs calendar get --uid EVENT_UID
+node scripts/mailcal.mjs calendar get --url https://dav.example/calendars/user/default/event.ics
+```
+
+`calendar list` 列出的是日历集合，`calendar events` 才返回具体日程。查询只读，日期按配置时区解释；重复日程由服务器在范围内展开。
+
 获取新增且尚未处理的邮件头：
 
 ```bash

@@ -57,6 +57,12 @@ test('installed skill runs outside the repo with no node_modules, through real I
   const updated = await json(['calendar', 'create', '--input', '-'], JSON.stringify({ ...event, description: 'Updated' }));
   assert.equal(updated.data.http_status, 204);
   assert.equal(dav.events.size, 1);
+  const occurrences = await json(['calendar', 'events', '--start', '2026-09-15', '--end', '2026-09-16']);
+  assert.equal(occurrences.data.events[0].uid, created.data.uid);
+  assert.equal(occurrences.data.events[0].description, 'Updated');
+  const detail = await json(['calendar', 'get', '--uid', created.data.uid]);
+  assert.equal(detail.data.events[0].start, '2026-09-15T06:00:00.000Z');
+  assert.equal((await json(['calendar', 'get', '--url', created.data.url])).data.etag, '"v1"');
   await json(['mail', 'ack', '--uid', '10', '--outcome', 'created', '--event-uid', created.data.uid]);
   assert.deepEqual((await json(['mail', 'pending'])).data.pending.map(item => item.uid), ['12']);
   await json(['mail', 'retry', '--uid', '10']);

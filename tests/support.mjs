@@ -28,6 +28,7 @@ export const rawMessage = Buffer.from(
 );
 
 const multistatus = (href, props) => `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>${href}</d:href><d:propstat><d:prop>${props}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`;
+const xmlEscape = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export async function davServer(t, { redirect = false, missingWellKnown = false, directHome = false } = {}) {
   const requests = [];
@@ -46,7 +47,23 @@ export async function davServer(t, { redirect = false, missingWellKnown = false,
         response.writeHead(exists ? 204 : 201, { ETag: '"v1"' }).end();
       } else if (request.method === 'DELETE') {
         response.writeHead(events.delete(request.url) ? 204 : 404).end();
+      } else if (request.method === 'GET' && events.has(request.url)) {
+        response.writeHead(200, { 'Content-Type': 'text/calendar', ETag: '"v1"' }).end(events.get(request.url));
       } else response.writeHead(404).end();
+      return;
+    }
+    if (request.method === 'REPORT') {
+      const uid = body.match(/<[^>]*text-match[^>]*>([^<]*)<\//)?.[1];
+      const rangeStart = body.match(/start="([^"]+)"/)?.[1];
+      const rangeEnd = body.match(/end="([^"]+)"/)?.[1];
+      const items = [...events].filter(([, data]) => {
+        if (uid) return xmlEscape(data.match(/\r\nUID:(.*)\r\n/)?.[1] || '') === uid;
+        const start = data.match(/DTSTART(?:;VALUE=DATE)?:([0-9TZ]+)/)?.[1];
+        const end = data.match(/DTEND(?:;VALUE=DATE)?:([0-9TZ]+)/)?.[1] || start;
+        return !rangeStart || (start < rangeEnd && (end > rangeStart || start === end && start >= rangeStart));
+      });
+      const responses = items.map(([href, data]) => multistatus(xmlEscape(href), `<d:getetag>&quot;v1&quot;</d:getetag><c:calendar-data>${xmlEscape(data)}</c:calendar-data>`).match(/<d:response>.*<\/d:response>/s)[0]).join('');
+      response.writeHead(207, { 'Content-Type': 'application/xml' }).end(`<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">${responses}</d:multistatus>`);
       return;
     }
     response.writeHead(207, { 'Content-Type': 'application/xml' });

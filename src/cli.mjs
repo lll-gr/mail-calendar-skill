@@ -6,7 +6,7 @@ import { configInit } from './config.mjs';
 import { createContext } from './context.mjs';
 import { MAIL_PROVIDERS, CALENDAR_PROVIDERS } from './providers.mjs';
 import { imapFolders, imapSearch, imapPending, imapGet, withImap } from './imap.mjs';
-import { calendarList, calendarCreate, calendarDelete } from './caldav.mjs';
+import { calendarList, calendarEvents, calendarGet, calendarCreate, calendarDelete } from './caldav.mjs';
 import { MailCalError, InputError, NotFoundError, isObject, positiveInteger } from './errors.mjs';
 import { VERSION } from './version.mjs';
 
@@ -136,6 +136,16 @@ export function buildParser(ctx = createContext()) {
   const calendar = program.command('calendar').description('Manage CalDAV calendar events');
   calendar.command('list').description('List the calendars visible to the account')
     .action(run(() => calendarList(ctx.calendar())));
+  calendar.command('events').description('Read event occurrences in a time range (read-only)')
+    .requiredOption('--start <date>', 'Inclusive date in configured timezone, or ISO datetime with offset')
+    .requiredOption('--end <date>', 'Exclusive date in configured timezone, or ISO datetime with offset')
+    .option('--calendar-url <url>', 'Override calendar collection URL')
+    .option('--summary <text>', 'Filter event titles by substring')
+    .addOption(new Option('--limit <number>', 'Maximum events returned').default(50).argParser(positiveCount))
+    .action(run(args => calendarEvents(ctx.calendar(), args)));
+  calendar.command('get').description('Read an event resource by UID or URL (read-only)')
+    .option('--uid <uid>').option('--url <url>').option('--calendar-url <url>')
+    .action(run(args => calendarGet(ctx.calendar(), args.uid, args.url, args.calendarUrl)));
   calendar.command('create').description('Create an event, replacing any event with the same UID')
     .addOption(new Option('--input <path>', 'Event JSON path, or - for stdin').makeOptionMandatory())
     .addOption(new Option('--calendar-url <url>'))

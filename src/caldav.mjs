@@ -1,5 +1,6 @@
-import { createDAVClient, getBasicAuthHeaders, getBearerAuthHeaders, updateCalendarObject, deleteCalendarObject } from 'tsdav';
-import { eventToIcs } from './ical.mjs';
+import { createDAVClient, getBasicAuthHeaders, getBearerAuthHeaders, calendarQuery, updateCalendarObject, deleteCalendarObject } from 'tsdav';
+import { DateTime } from 'luxon';
+import { eventToIcs, eventsFromIcs, eventTime } from './ical.mjs';
 import { ConfigError, ConnectionFailure, NotFoundError, InputError, MailCalError } from './errors.mjs';
 import { VERSION } from './version.mjs';
 
@@ -70,6 +71,76 @@ export function calendarUrl(settings, override) {
 }
 
 const resourceUrl = (collection, uid) => collection + encodeURIComponent(uid).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase()) + '.ics';
+
+function rangeTime(value, timezone) {
+  const parsed = eventTime(value);
+  if (!parsed.allDay) return parsed.date;
+  const date = DateTime.fromISO(value, { zone: timezone });
+  if (!date.isValid) throw new InputError('Invalid calendar timezone');
+  return date.toJSDate();
+}
+
+const davTime = date => date.toISOString().slice(0, 19).replace(/[-:]/g, '') + 'Z';
+
+async function queryEvents(settings, collection, filter, expand, fetchImpl) {
+  try {
+    const responses = await calendarQuery({
+      url: collection, depth: '1',
+      props: { 'd:getetag': {}, 'c:calendar-data': expand ? { 'c:expand': { _attributes: expand } } : {} },
+      filters: [{ 'comp-filter': { _attributes: { name: 'VCALENDAR' }, 'comp-filter': { _attributes: { name: 'VEVENT' }, ...filter } } }],
+      fetch: calendarTransport(settings, fetchImpl),
+    });
+    return responses.map(response => {
+      const data = response.props?.calendarData;
+      const body = data?._cdata ?? data;
+      if (!response.href || typeof body !== 'string') throw new ConnectionFailure('CalDAV report did not return event data');
+      const url = new URL(response.href, collection).href;
+      if (new URL(url).origin !== new URL(settings.base_url).origin) throw new ConnectionFailure('CalDAV report returned a different origin');
+      return { url, etag: String(response.props?.getetag ?? ''), events: eventsFromIcs(body, settings.timezone), ical: body };
+    });
+  } catch (error) {
+    if (error instanceof MailCalError) throw error;
+    throw new ConnectionFailure('CalDAV event query failed; check server REPORT support and calendar configuration');
+  }
+}
+
+export async function calendarEvents(settings, args, fetchImpl = globalThis.fetch) {
+  if (!args.start || !args.end) throw new InputError('calendar events requires --start and --end');
+  const start = rangeTime(args.start, settings.timezone || 'UTC');
+  const end = rangeTime(args.end, settings.timezone || 'UTC');
+  if (end <= start) throw new InputError('Calendar range end must be after start');
+  const limit = args.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new InputError('Calendar limit must be a positive integer');
+  const collection = calendarUrl(settings, args.calendarUrl);
+  const range = { start: davTime(start), end: davTime(end) };
+  // Let the server expand recurrence rules and exceptions within the requested
+  // interval; do not confuse a recurring series' original DTSTART with today.
+  const resources = await queryEvents(settings, collection, { 'time-range': { _attributes: range } }, range, fetchImpl);
+  if (resources.some(resource => resource.events.some(event => event.rrule.length))) {
+    throw new ConnectionFailure('CalDAV server did not expand recurring events in the requested range');
+  }
+  const events = resources.flatMap(resource => resource.events.map(event => ({ ...event, resource_url: resource.url, etag: resource.etag })))
+    .filter(event => !args.summary || event.summary.toLocaleLowerCase().includes(args.summary.toLocaleLowerCase()))
+    .sort((a, b) => rangeTime(a.start, settings.timezone || 'UTC') - rangeTime(b.start, settings.timezone || 'UTC') || a.uid.localeCompare(b.uid));
+  return { calendar_url: collection, events: events.slice(0, limit), total: events.length, truncated: events.length > limit };
+}
+
+export async function calendarGet(settings, uid, url, override, fetchImpl = globalThis.fetch) {
+  if (!uid && !url) throw new InputError('calendar get requires --uid or --url');
+  if (url) {
+    const response = await calendarTransport(settings, fetchImpl)(url, { method: 'GET', headers: { Accept: 'text/calendar' } });
+    const body = await response.text();
+    return { url: response.url || url, etag: response.headers.get('etag') || '', events: eventsFromIcs(body, settings.timezone), ical: body };
+  }
+  // UID is not necessarily the filename for events created by other clients.
+  const resources = await queryEvents(settings, calendarUrl(settings, override), {
+    'prop-filter': { _attributes: { name: 'UID' }, 'text-match': { _attributes: { collation: 'i;octet' }, _text: uid } },
+  }, undefined, fetchImpl);
+  const matches = resources.filter(resource => resource.events.some(event => event.uid === uid));
+  if (!matches.length) throw new NotFoundError('Calendar event UID not found');
+  if (matches.length > 1) throw new ConnectionFailure('Calendar UID matches multiple resources; use --url');
+  return matches[0];
+}
 
 export async function calendarCreate(settings, data, override, fetchImpl = globalThis.fetch) {
   const { uid, body } = eventToIcs(data);

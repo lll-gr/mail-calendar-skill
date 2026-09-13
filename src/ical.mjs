@@ -1,8 +1,53 @@
 import ical from 'ical-generator';
+import ICAL from 'ical.js';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { DateTime, Duration } from 'luxon';
-import { InputError, isObject } from './errors.mjs';
+import { InputError, ConnectionFailure, isObject } from './errors.mjs';
 import { parseDate } from './dates.mjs';
+
+// Embedded VTIMEZONE definitions take precedence. For IANA TZIDs without a
+// definition, use Luxon's system timezone data instead of silently treating UTC.
+function readTime(time, property, timezone) {
+  if (!time) return '';
+  if (time.isDate) return time.toString();
+  if (time.zone !== ICAL.Timezone.localTimezone) return time.toJSDate().toISOString();
+  const zone = property?.getParameter('tzid') || timezone;
+  const date = DateTime.fromISO(time.toString(), { zone });
+  if (!date.isValid) throw new Error('Unresolved event timezone');
+  return date.toISO({ suppressMilliseconds: true });
+}
+
+export function eventsFromIcs(body, timezone = 'UTC') {
+  try {
+    if (typeof body !== 'string' || !body.trim()) throw new Error('Missing calendar data');
+    const calendar = new ICAL.Component(ICAL.parse(body));
+    if (calendar.name !== 'vcalendar') throw new Error('Expected VCALENDAR');
+    return calendar.getAllSubcomponents('vevent').map(component => {
+      const event = new ICAL.Event(component);
+      if (!event.uid || !event.startDate) throw new Error('Missing UID or DTSTART');
+      const startProperty = component.getFirstProperty('dtstart');
+      return {
+        uid: event.uid, summary: event.summary || '',
+        start: readTime(event.startDate, startProperty, timezone),
+        end: readTime(event.endDate, component.getFirstProperty('dtend') || startProperty, timezone),
+        all_day: event.startDate.isDate,
+        timezone: event.startDate.isDate ? '' : startProperty.getParameter('tzid') || (event.startDate.zone === ICAL.Timezone.utcTimezone ? 'UTC' : timezone),
+        description: event.description || '', location: event.location || '',
+        url: component.getFirstPropertyValue('url') || '',
+        status: component.getFirstPropertyValue('status') || '',
+        rrule: component.getAllProperties('rrule').map(property => property.getFirstValue().toString()),
+        recurrence_id: readTime(component.getFirstPropertyValue('recurrence-id'), component.getFirstProperty('recurrence-id'), timezone),
+        alarms: component.getAllSubcomponents('valarm').map(alarm => ({
+          action: alarm.getFirstPropertyValue('action') || '',
+          trigger: alarm.getFirstPropertyValue('trigger')?.toString() || '',
+          related: alarm.getFirstProperty('trigger')?.getParameter('related') || 'START',
+        })),
+      };
+    });
+  } catch {
+    throw new ConnectionFailure('Cannot parse CalDAV event data; check the calendar data and timezone');
+  }
+}
 
 export function eventTime(value) {
   const iso = value.toUpperCase();
