@@ -341,5 +341,6 @@ npx skills add https://github.com/lll-gr/mail-calendar-skill/releases/download/v
 - [Skill 使用说明](skills/mail-calendar/SKILL.md)
 - [CLI 命令参考](skills/mail-calendar/references/commands.md)
 - [邮箱和日历配置](skills/mail-calendar/references/configuration.md)
+- [红米手机同步 QQ 日历与排障](skills/mail-calendar/references/redmi-calendar.md)
 - [日程 JSON 格式](skills/mail-calendar/references/event-json.md)
 - [增量处理状态](skills/mail-calendar/references/processing-state.md)

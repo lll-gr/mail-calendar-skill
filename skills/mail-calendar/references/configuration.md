@@ -137,3 +137,9 @@ node scripts/mailcal.mjs calendar list
 - CalDAV `bearer`：OAuth access token。
 
 更换凭据或服务器地址后执行 `config test`。
+
+## 手机显示云端日程
+
+Skill 写入 CalDAV 成功，不等于手机已同步。手机日历需要单独添加同一账号的 CalDAV 日历，并启用目标集合的显示。Exchange / IMAP 账号的设置不能替代 CalDAV 连接。
+
+红米手机的一次实际接入过程、截图及重复显示排查见 [红米手机同步 QQ 邮箱日历](redmi-calendar.md)。菜单可能随系统和应用版本变化，请先确认日历自身是否提供 CalDAV 入口，再考虑安装额外同步工具。
